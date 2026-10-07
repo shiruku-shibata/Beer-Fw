@@ -127,7 +127,7 @@ void app_loop(void)
     scheduler_run(now);
 
 #if COMM_ENABLE
-    // 定期送信に加え、モジュールの状態変化（飲み始め・警報など）があればすぐ送る
+    // 定期送信に加え、モジュールの状態変化（検出の開始・警報など）があればすぐ送る
     bool event = scheduler_take_events();
     if (event || now - s_lastTx >= COMM_TX_PERIOD_MS) {
         s_lastTx = now;
