@@ -4,7 +4,7 @@
  * - LOWBAT_LOW_PERCENT 以下: 「残量低下」フラグを立て、すぐ gateway へ送る
  * - LOWBAT_ALARM_PERCENT 以下: 電源が落ちるまで振動し続ける（警報）
  * - いずれも LOWBAT_HYSTERESIS 分戻ったら解除する（充電時など）
- * 警報振動は vibration_set_alarm() で出すため、飲酒検出の振動より優先される。
+ * 警報振動は vibration_set_alarm() で出すため、他モジュールの振動より優先される。
  *
  * 【依存】core/power（残量）、vibration（振動）
  * 【送信データ】LowbatPayload 2 バイト

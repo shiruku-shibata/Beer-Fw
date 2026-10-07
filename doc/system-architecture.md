@@ -1,12 +1,13 @@
 # Beer-fw システム構成設計書
 
-最終更新: 2026-10-04
+最終更新: 2026-10-05
 
 ## 概要
 
-複数台の M5StickC Plus2（node）で計測したセンサー値を ESP-NOW で 1 台の gateway に集約し、PC 上の Godot Engine から入力として使えるようにする。
+複数台の M5StickC Plus2（node）で計測したセンサー値を ESP-NOW で 1 台の gateway に集約し、PC 上の Godot Engine から入力として使えるようにする。特定のゲームに依存しない共通ファームウェアとし、ゲームごとの動作はゲーム専用モジュールとビルド環境で足す。
 
-- **現状**: node（最大 8 台）→ gateway → USB シリアルの JSON 出力までを実装済み。搭載モジュールは加速度、振動（Vibration Hat）、飲酒検出。ジョッキを傾けている間、node 単体でゴクゴクと振動する。
+- **現状**: node（最大 8 台）→ gateway → USB シリアルの JSON 出力までを実装済み。汎用モジュールは加速度、振動（Vibration Hat）、電池残量監視。
+- **ゲーム別**: ビールジョッキ（環境 `mug`）。飲酒検出モジュールを有効にし、ジョッキを傾けている間、node 単体でゴクゴクと振動する。
 - **本書のスコープ**: FW の構成、通信プロトコル、Godot 接続に向けた方針。
 - **対象外**: Godot 側ゲームロジックの設計。
 - ファイル構成の設計意図は [fw-structure-proposal.md](fw-structure-proposal.md) を参照。
@@ -43,8 +44,25 @@ node と gateway は同じデバイス・同じソースツリーを使い、Pla
 | framework | arduino |
 | ライブラリ | m5stack/M5StickCPlus2@^1.0.2、m5stack/M5Unified@0.1.12 |
 | ビルド前処理 | scripts/fix_dfrobot.py（依存で入る DFRobot_GP8XXX の `analogWriteResolution` 呼び出しをパッチ） |
-| ビルド環境 | `node`（`-DROLE_NODE`）、`mug`（node の省電力版。送信時だけ無線を起動）、`gateway`（`-DROLE_GATEWAY`） |
+| ビルド環境 | 下表 |
 | シリアル | USB、115200 bps |
+
+### ビルド環境
+
+| 区分 | 環境 | 内容 |
+| --- | --- | --- |
+| 汎用 | `node` | `-DROLE_NODE`。汎用モジュールのみ。100 ms ごとに送信 |
+| 汎用 | `node_lowpower` | `node` の省電力版。送信時だけ無線を起動し、1 秒ごと＋状態変化時に送る |
+| 汎用 | `gateway` | `-DROLE_GATEWAY`。ゲーム専用を含む全モジュールの JSON 変換を持つ |
+| ゲーム別 | `mug` | ビールジョッキ。`node_lowpower` + 飲酒検出（`-DMODULE_DRINK_ENABLE=1`） |
+
+ゲーム専用モジュールは `config.h` で `MODULE_GAME_DEFAULT` を既定値にする。node では 0（無効）、gateway では 1（有効）になるため、gateway は 1 種類のビルドでどのゲームの node からも受けられる。
+
+**新しいゲームを足す手順**
+
+1. ゲーム専用の処理があれば、モジュールとして追加する（[fw-structure-proposal.md](fw-structure-proposal.md) の「新しいセンサーを追加する手順」）。`config.h` の既定値は `MODULE_GAME_DEFAULT` にする。
+2. `platformio.ini` に `[env:<ゲーム名>]` を足し、`node` か `node_lowpower` を `extends` して、使うモジュールの `MODULE_*_ENABLE=1` を `build_flags` に足す。
+3. 汎用モジュールが要らなければ、同じ `build_flags` で `MODULE_*_ENABLE=0` にする。
 
 ### ビルド・書き込み
 
@@ -52,13 +70,14 @@ node と gateway は同じデバイス・同じソースツリーを使い、Pla
 pio run                                   # node と gateway を両方ビルド
 pio run -e gateway -t upload              # gateway を書き込み
 PLATFORMIO_BUILD_FLAGS="-DNODE_ID=2" pio run -e node -t upload   # node を ID 2 で書き込み
+pio run -e mug -t upload                  # ゲーム別（ビールジョッキ）を書き込み
 ```
 
 ### ディレクトリ構成
 
 ```text
 /
-├── platformio.ini        # ビルド環境（node / gateway）
+├── platformio.ini        # ビルド環境（汎用 node / node_lowpower / gateway、ゲーム別 mug）
 ├── doc/                  # 設計資料
 ├── scripts/              # ビルド補助スクリプト
 └── src/
@@ -78,7 +97,8 @@ PLATFORMIO_BUILD_FLAGS="-DNODE_ID=2" pio run -e node -t upload   # node を ID 2
     │   ├── _template.cpp # 新規モジュールのひな形
     │   ├── accel.cpp     # 加速度
     │   ├── vibration.cpp/.h  # 振動（Vibration Hat U159）。操作 API をヘッダで公開
-    │   └── drink.cpp     # 飲酒検出。accel と vibration を使う
+    │   ├── lowbat.cpp    # 電池残量監視。vibration を使う
+    │   └── drink.cpp     # [ゲーム: mug] 飲酒検出。accel と vibration を使う
     └── app/
         ├── node.cpp      # 計測して送る
         └── gateway.cpp   # 受けて PC へ出す
@@ -135,11 +155,11 @@ M5StickC Vibration Hat（M5Stack U159、[製品ページ](https://www.switch-sci
 
 ## 省電力
 
-ジョッキ用（環境 `mug`）は電池で動かすため、次の対策を入れている。
+電池で動かす node（環境 `node_lowpower` と、それを継承する `mug` などのゲーム別環境）のため、次の対策を入れている。
 
 | 対策 | 内容 | 設定 |
 | --- | --- | --- |
-| 送信時だけ無線を起動 | `mug` 環境では送信のたびに WiFi / ESP-NOW を起動し、送信完了（最大 30 ms 待ち）で止める。送るのは 1 秒ごとと、モジュールの状態変化時（`Module.take_event()`）。node 側は受信できない | `COMM_LOW_POWER=1`、`COMM_TX_PERIOD_MS=1000`（platformio.ini の `mug`）。通信自体を止めるなら `COMM_ENABLE=0` |
+| 送信時だけ無線を起動 | `node_lowpower` 系の環境では送信のたびに WiFi / ESP-NOW を起動し、送信完了（最大 30 ms 待ち）で止める。送るのは 1 秒ごとと、モジュールの状態変化時（`Module.take_event()`）。node 側は受信できない | `COMM_LOW_POWER=1`、`COMM_TX_PERIOD_MS=1000`（platformio.ini の `node_lowpower`）。通信自体を止めるなら `COMM_ENABLE=0` |
 | 画面の自動消灯 | 操作がなければ 10 秒でパネルをスリープし、バックライトを消す。ボタン A / B で点灯 | `DISPLAY_AUTO_OFF_MS`、`DISPLAY_BRIGHTNESS`（64） |
 | CPU クロック | 240 MHz → 80 MHz | `POWER_CPU_FREQ_MHZ` |
 | 待ち時間の light sleep | 次のモジュール処理（最短 20 ms 後）まで light sleep。無線停止中・画面オフ・振動なしのときだけ | `POWER_LIGHT_SLEEP_ENABLE` |
@@ -154,13 +174,13 @@ M5StickC Vibration Hat（M5Stack U159、[製品ページ](https://www.switch-sci
 | 残量 | 動作 | 解除 |
 | --- | --- | --- |
 | 20 % 以下 | 「残量低下」フラグ（`"low":1`）を立て、すぐ gateway へ送る。node の画面に `LOW BAT` | 25 % 以上に戻ったとき |
-| 5 % 以下 | 電源が落ちるまで 100 % で振動し続ける（飲酒の振動より優先）。`"alarm":1` もすぐ送る | 10 % 以上に戻ったとき |
+| 5 % 以下 | 電源が落ちるまで 100 % で振動し続ける（他モジュールの振動より優先）。`"alarm":1` もすぐ送る | 10 % 以上に戻ったとき |
 
 設定は `config.h` の `LOWBAT_LOW_PERCENT`、`LOWBAT_ALARM_PERCENT`、`LOWBAT_HYSTERESIS`。gateway 側（PC・Godot）は `battery.low` を見れば交換・充電の合図にできる。
 
-## 飲酒検出（ビールジョッキ）
+## ゲーム: 飲酒検出（ビールジョッキ）
 
-M5Stick をジョッキに入れ、飲む動作（持ち上げて手前に傾ける）の間、ゴクゴクと飲んでいるように振動させる。node 単体で完結し、gateway や PC は不要。
+環境 `mug` で有効になるゲーム専用モジュール。M5Stick をジョッキに入れ、飲む動作（持ち上げて手前に傾ける）の間、ゴクゴクと飲んでいるように振動させる。node 単体で完結し、gateway や PC は不要。
 
 ```mermaid
 stateDiagram-v2
@@ -178,8 +198,8 @@ stateDiagram-v2
 | 傾き | 基準とのなす角（方向は問わない）。M5Stick の入れ向きに依存しない |
 | 「持ち上げ」の扱い | 加速度だけでは高さを測れないため判定しない。満たしたジョッキを机に置いたまま 40° 傾けることはないので、傾きで代用する |
 | ゴクッ 1 回 | 100 % 160 ms → 休 40 ms → 100 % 120 ms |
-| ゴクッの間隔 | 40° で 450 ms、90° で 200 ms。深く傾けるほど速くなる |
-| 設定 | `config.h` の `DRINK_*`。`MODULE_DRINK_ENABLE` には accel と vibration が必要（不足はビルドエラー） |
+| ゴクッの間隔 | 40° で 650 ms、90° で 350 ms。深く傾けるほど速くなる |
+| 設定 | `config.h` の `DRINK_*`。`MODULE_DRINK_ENABLE`（既定は node で 0、`mug` で 1）には accel と vibration が必要（不足はビルドエラー） |
 
 ## 通信プロトコル
 
@@ -206,7 +226,7 @@ gateway は知らない `module_id` のレコードを `length` で読み飛ば�
 | --- | --- | --- |
 | 0x01 | accel | float x, y, z（12 バイト） |
 | 0x02 | vibration | uint8 現在の振動の強さ 0〜100 %（1 バイト） |
-| 0x03 | drink | uint8 フラグ（bit0 飲んでいる、bit1 検出中）、uint8 傾き [deg]、uint16 累計ゴクッ回数（4 バイト） |
+| 0x03 | drink（ゲーム: mug） | uint8 フラグ（bit0 飲んでいる、bit1 検出中）、uint8 傾き [deg]、uint16 累計ゴクッ回数（4 バイト） |
 | 0x04 | lowbat | int8 電池残量 [%]、uint8 フラグ（bit0 残量低下 ≤20 %、bit1 電池切れ警報 ≤5 %）（2 バイト） |
 
 **シリアル出力（gateway → PC、115200 bps）**
