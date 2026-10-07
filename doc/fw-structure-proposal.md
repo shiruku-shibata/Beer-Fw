@@ -248,7 +248,7 @@ build_src_filter = +<*> -<app/node.cpp>
 
 1. `src/modules/_template.cpp` を `src/modules/xxx.cpp` にコピーし、`init` / `update` / `encode` / `to_json` を実装する。ファイル全体を `#if MODULE_XXX_ENABLE` で囲む。
 2. `core/protocol.h` に `MODULE_ID_XXX` を追加する（既存 ID の再利用・変更は禁止）。
-3. `config.h` に `MODULE_XXX_ENABLE` と周期などのパラメータを追加する。
+3. `config.h` に `MODULE_XXX_ENABLE` と周期などのパラメータを追加する。特定のゲームでしか使わないモジュールは、既定値を `MODULE_GAME_DEFAULT` にし、ゲームの環境で有効にする（[system-architecture.md](system-architecture.md) の「ビルド環境」）。
 4. `modules/registry.cpp` に `extern` 宣言とテーブル行を追加する。
 5. 外部ライブラリが必要なら `platformio.ini` の `lib_deps` に追加する。
 6. `pio run -e node` と `pio run -e gateway` の両方がビルドできることを確認する。
