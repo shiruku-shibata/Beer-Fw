@@ -238,6 +238,8 @@ gateway は知らない `module_id` のレコードを `length` で読み飛ば�
 
 どの方式でも、Godot 側は「1 メッセージ = 1 パケット分の JSON」を `node` ごとに受け取る形に揃える。
 
+接続確認用に「USB シリアル + PC ブリッジ」を実装済み（`tools/`・`godot/`）。手順は [godot-connection-test.md](godot-connection-test.md)。
+
 ## 現状の課題
 
 | 課題 | 場所 | 影響 | 方針 |
