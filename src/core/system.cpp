@@ -7,6 +7,9 @@
 #include "core/power.h"
 #include "core/protocol.h"
 
+/**
+ * @brief ハードウェアの共通初期化。M5（ブザー・マイクなし）、CPU クロック、シリアル、LCD、電池残量。
+ */
 void system_init(void)
 {
     auto cfg = M5.config();
@@ -28,6 +31,9 @@ void system_init(void)
 #endif
 }
 
+/**
+ * @brief 毎ループの共通処理。ボタン状態を更新し、ボタン A / B で画面を点灯、画面の自動消灯と電池残量を更新する。
+ */
 void system_update(void)
 {
     M5.update();

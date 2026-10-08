@@ -21,6 +21,7 @@ var _udp := PacketPeerUDP.new()
 var _known := {}
 
 
+## UDP ポートを開いて受信を始める。開けなければエラーを出す。
 func _ready() -> void:
 	var err := _udp.bind(port, bind_address)
 	if err != OK:
@@ -29,10 +30,13 @@ func _ready() -> void:
 	print("GatewayReceiver: listening on %s:%d" % [bind_address, port])
 
 
+## UDP ポートを開けて受信待ちになっているか。
 func is_listening() -> bool:
 	return _udp.is_bound()
 
 
+## 届いた UDP パケットをすべて読み、JSON として解釈できたものを packet_received で通知する。
+## 初めての node なら先に node_connected も通知する。
 func _process(_delta: float) -> void:
 	while _udp.get_available_packet_count() > 0:
 		var text := _udp.get_packet().get_string_from_utf8()
@@ -51,5 +55,6 @@ func _process(_delta: float) -> void:
 		packet_received.emit(node_id, data)
 
 
+## ノード削除時に UDP ポートを閉じる。
 func _exit_tree() -> void:
 	_udp.close()

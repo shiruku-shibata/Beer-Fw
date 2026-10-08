@@ -168,6 +168,9 @@ static void runGulp(uint32_t now)
 // =============================================
 // Module インターフェース
 // =============================================
+/**
+ * @brief [Module.init] 停止状態（ボタン A 待ち）で始める。
+ */
 static bool drink_init(void)
 {
     s_state = ST_STOPPED;
@@ -175,6 +178,10 @@ static bool drink_init(void)
     return true;
 }
 
+/**
+ * @brief [Module.update] ボタン A を処理し、加速度をローパスして傾きを求め、
+ *        状態（基準取得→待機→傾き中→飲んでいる）を進める。飲んでいる間はゴクッの振動を出す。
+ */
 static void drink_update(void)
 {
     uint32_t now = millis();
@@ -250,6 +257,9 @@ static void drink_update(void)
     }
 }
 
+/**
+ * @brief [Module.take_event] 状態が変わっていれば true を返し、フラグを下ろす。
+ */
 static bool drink_take_event(void)
 {
     bool e = s_event;
@@ -257,6 +267,9 @@ static bool drink_take_event(void)
     return e;
 }
 
+/**
+ * @brief [Module.encode] フラグ（飲んでいる / 検出中）・傾き・累計ゴクッ回数を 4 バイトにする。
+ */
 static size_t drink_encode(uint8_t *buf, size_t cap)
 {
     if (cap < sizeof(DrinkPayload)) return 0;
@@ -268,6 +281,9 @@ static size_t drink_encode(uint8_t *buf, size_t cap)
     return sizeof(p);
 }
 
+/**
+ * @brief [Module.to_json] 受信データを "drink":{"armed","active","tilt","gulps"} にする。
+ */
 static int drink_to_json(const uint8_t *data, size_t len, char *out, size_t cap)
 {
     if (len != sizeof(DrinkPayload)) return 0;
@@ -277,6 +293,9 @@ static int drink_to_json(const uint8_t *data, size_t len, char *out, size_t cap)
                     (p.flags >> 1) & 1, p.flags & 1, p.tilt_deg, p.gulps);
 }
 
+/**
+ * @brief [Module.to_text] 受信データを LCD 用の 1 行にする（停止中は "PRESS A"）。
+ */
 static int drink_to_text(const uint8_t *data, size_t len, char *out, size_t cap)
 {
     if (len != sizeof(DrinkPayload)) return 0;

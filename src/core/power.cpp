@@ -9,6 +9,9 @@ static int      s_level      = -1;
 static uint32_t s_lastCheck  = 0;
 static bool     s_lowWarned  = false;
 
+/**
+ * @brief 電池残量を初回取得してログに出す。
+ */
 void power_init(void)
 {
     s_level     = M5.Power.getBatteryLevel();
@@ -16,6 +19,11 @@ void power_init(void)
     LOG_I("Battery: %d%%", s_level);
 }
 
+/**
+ * @brief POWER_CHECK_PERIOD_MS ごとに電池残量を取り直し、POWER_LOW_PERCENT 以下になったら 1 回だけ警告ログを出す。
+ *
+ * @param now 現在時刻 [ms]
+ */
 void power_update(uint32_t now)
 {
     if (now - s_lastCheck < POWER_CHECK_PERIOD_MS) return;
@@ -30,11 +38,20 @@ void power_update(uint32_t now)
     s_lowWarned = low;
 }
 
+/**
+ * @brief 最後に取得した電池残量 [%] を返す（未取得・取得失敗時は負）。
+ */
 int power_battery_level(void)
 {
     return s_level;
 }
 
+/**
+ * @brief 次の処理まで待つ。allow_sleep なら light sleep、そうでなければ delay()（CPU はアイドル）。
+ *
+ * @param ms 待ち時間 [ms]
+ * @param allow_sleep light sleep してよいか（無線・PWM・画面が止まっていること）
+ */
 void power_wait(uint32_t ms, bool allow_sleep)
 {
     if (ms == 0) return;

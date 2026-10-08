@@ -101,6 +101,9 @@ static void draw(void)
     display_footer();
 }
 
+/**
+ * @brief node の初期化。通信を起動し（通信ありなら自機 MAC を 2 秒表示）、全モジュールを初期化する。
+ */
 void app_init(void)
 {
     if (!comm_init()) {
@@ -120,6 +123,10 @@ void app_init(void)
 #endif
 }
 
+/**
+ * @brief node のメインループ。モジュールを動かし、定期／状態変化時に送信し、画面を更新して、
+ *        次の処理まで待つ（条件がそろえば light sleep）。
+ */
 void app_loop(void)
 {
     uint32_t now = millis();

@@ -200,6 +200,9 @@ static void drawNode(uint8_t idx)
     display_footer();
 }
 
+/**
+ * @brief gateway の初期化。WiFi AP と ESP-NOW を起動し、AP MAC を 3 秒表示する。
+ */
 void app_init(void)
 {
     if (!comm_init()) {
@@ -216,6 +219,10 @@ void app_init(void)
     drawWaiting();
 }
 
+/**
+ * @brief gateway のメインループ。ボタン A で表示 node を切り替え、受信キューを空になるまで処理し、
+ *        取りこぼしを警告し、表示中の node が更新されていれば描き直す。
+ */
 void app_loop(void)
 {
     // ボタン A: 表示する node を切り替える

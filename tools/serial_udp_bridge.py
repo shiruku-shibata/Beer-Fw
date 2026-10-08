@@ -30,6 +30,7 @@ RECONNECT_WAIT_S = 2.0   # シリアルが切れたときの再接続間隔 [s]
 
 
 def log(msg):
+    """時刻付きでメッセージを表示する。"""
     print(time.strftime("%H:%M:%S"), msg, flush=True)
 
 
@@ -49,6 +50,7 @@ def find_port():
 
 
 def open_serial(port, baud):
+    """ESP32 をリセットさせずにシリアルポートを開く（DTR / RTS を下げてから開く）。"""
     import serial
 
     ser = serial.Serial()
@@ -63,6 +65,10 @@ def open_serial(port, baud):
 
 
 def run_serial(args, sock, dest):
+    """gateway のシリアル出力を読み、JSON 行（"{" 始まり）だけを UDP で dest へ送る。
+
+    ログ行はそのまま表示する。ポートが見つからない・切れたときは待って再接続し続ける。
+    """
     try:
         import serial
     except ImportError:
@@ -162,6 +168,7 @@ def run_demo(args, sock, dest):
 
 
 def main():
+    """引数を読み、実機中継（既定）か疑似データ送信（--demo）を始める。Ctrl+C で終了。"""
     ap = argparse.ArgumentParser(description="gateway のシリアル JSON を UDP に中継する")
     ap.add_argument("--port", help="シリアルポート（省略時は USB シリアルを自動検出）")
     ap.add_argument("--baud", type=int, default=DEFAULT_BAUD)

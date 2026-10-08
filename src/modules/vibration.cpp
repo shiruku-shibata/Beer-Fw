@@ -37,6 +37,12 @@ static void applyStrength(uint8_t strength)
 // =============================================
 // 公開 API（modules/vibration.h）
 // =============================================
+/**
+ * @brief 振動を開始する（警報中は無視）。動作中に呼ぶと強さと時間を上書きする。
+ *
+ * @param strength    強さ 0〜100 [%]。0 は停止
+ * @param duration_ms 振動時間 [ms]。0 は vibration_stop() まで継続
+ */
 void vibration_start(uint8_t strength, uint32_t duration_ms)
 {
     if (!s_ready || s_alarm) return;
@@ -54,6 +60,9 @@ void vibration_start(uint8_t strength, uint32_t duration_ms)
     LOG_D("Vibration start: %u%% %lu ms", strength, (unsigned long)duration_ms);
 }
 
+/**
+ * @brief 振動を止める（警報中は無視）。
+ */
 void vibration_stop(void)
 {
     if (!s_ready || s_alarm) return;
@@ -62,11 +71,19 @@ void vibration_stop(void)
     s_strength = 0;
 }
 
+/**
+ * @brief 振動中か（警報振動を含む）。Module.busy にも使う。
+ */
 bool vibration_is_active(void)
 {
     return s_active;
 }
 
+/**
+ * @brief 警報振動（100 % 連続）の ON/OFF。ON の間は vibration_start / stop を無視する。
+ *
+ * @param on true で警報開始、false で停止
+ */
 void vibration_set_alarm(bool on)
 {
     if (!s_ready || on == s_alarm) return;
@@ -82,6 +99,10 @@ void vibration_set_alarm(bool on)
 // =============================================
 // Module インターフェース
 // =============================================
+/**
+ * @brief [Module.init] PWM（LEDC）を設定してモーター出力ピンにつなぎ、停止状態にする。
+ *        VIBRATION_BOOT_TEST_MS > 0 なら動作確認の振動を出す。
+ */
 static bool vibration_init(void)
 {
     if (ledcSetup(VIBRATION_LEDC_CHANNEL, VIBRATION_PWM_FREQ, VIBRATION_PWM_BITS) == 0) {
@@ -108,6 +129,9 @@ static void vibration_update(void)
     }
 }
 
+/**
+ * @brief [Module.encode] 現在の振動の強さ [%] を 1 バイトにする。
+ */
 static size_t vibration_encode(uint8_t *buf, size_t cap)
 {
     if (cap < 1) return 0;
@@ -115,12 +139,18 @@ static size_t vibration_encode(uint8_t *buf, size_t cap)
     return 1;
 }
 
+/**
+ * @brief [Module.to_json] 受信データを "vibration":強さ にする。
+ */
 static int vibration_to_json(const uint8_t *data, size_t len, char *out, size_t cap)
 {
     if (len != 1) return 0;
     return snprintf(out, cap, "\"vibration\":%u", data[0]);
 }
 
+/**
+ * @brief [Module.to_text] 受信データを LCD 用の "VIB:xx%" にする。
+ */
 static int vibration_to_text(const uint8_t *data, size_t len, char *out, size_t cap)
 {
     if (len != 1) return 0;

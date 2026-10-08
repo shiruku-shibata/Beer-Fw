@@ -24,17 +24,26 @@ typedef struct __attribute__((packed)) {
 
 static XxxPayload s_latest = {};
 
+/**
+ * @brief [Module.init] センサーを初期化する。失敗したら false（このモジュールだけ無効になる）。
+ */
 static bool xxx_init(void)
 {
     // センサーの初期化。失敗したら false
     return true;
 }
 
+/**
+ * @brief [Module.update] センサーを読み、最新値を更新する（ブロッキング禁止）。
+ */
 static void xxx_update(void)
 {
     // センサーを読んで s_latest を更新する（ブロッキング禁止）
 }
 
+/**
+ * @brief [Module.encode] 最新値を送信用バイト列にする。書いたバイト数を返す。
+ */
 static size_t xxx_encode(uint8_t *buf, size_t cap)
 {
     if (cap < sizeof(XxxPayload)) return 0;
@@ -42,6 +51,9 @@ static size_t xxx_encode(uint8_t *buf, size_t cap)
     return sizeof(XxxPayload);
 }
 
+/**
+ * @brief [Module.to_json] 受信データを JSON の 1 要素（"xxx":値）にする。
+ */
 static int xxx_to_json(const uint8_t *data, size_t len, char *out, size_t cap)
 {
     if (len != sizeof(XxxPayload)) return 0;
@@ -50,6 +62,9 @@ static int xxx_to_json(const uint8_t *data, size_t len, char *out, size_t cap)
     return snprintf(out, cap, "\"xxx\":%d", p.value);
 }
 
+/**
+ * @brief [Module.to_text] 受信データを LCD 用の短いテキストにする。
+ */
 static int xxx_to_text(const uint8_t *data, size_t len, char *out, size_t cap)
 {
     if (len != sizeof(XxxPayload)) return 0;

@@ -49,6 +49,10 @@ static bool judge(bool on, int level, int th)
     return on;
 }
 
+/**
+ * @brief [Module.update] 電池残量から「残量低下」と「電池切れ警報」を判定し、
+ *        変化したらイベントを立てる。警報は vibration_set_alarm() で振動させる。
+ */
 static void lowbat_update(void)
 {
     int level = power_battery_level();
@@ -72,6 +76,9 @@ static void lowbat_update(void)
     }
 }
 
+/**
+ * @brief [Module.take_event] フラグが変わっていれば true を返し、イベントを下ろす。
+ */
 static bool lowbat_take_event(void)
 {
     bool e = s_event;
@@ -79,6 +86,9 @@ static bool lowbat_take_event(void)
     return e;
 }
 
+/**
+ * @brief [Module.encode] 電池残量とフラグ（残量低下 / 警報）を 2 バイトにする。
+ */
 static size_t lowbat_encode(uint8_t *buf, size_t cap)
 {
     if (cap < sizeof(LowbatPayload)) return 0;
@@ -89,6 +99,9 @@ static size_t lowbat_encode(uint8_t *buf, size_t cap)
     return sizeof(p);
 }
 
+/**
+ * @brief [Module.to_json] 受信データを "battery":{"level","low","alarm"} にする。
+ */
 static int lowbat_to_json(const uint8_t *data, size_t len, char *out, size_t cap)
 {
     if (len != sizeof(LowbatPayload)) return 0;
@@ -98,6 +111,9 @@ static int lowbat_to_json(const uint8_t *data, size_t len, char *out, size_t cap
                     p.level, (p.flags & LOWBAT_FLAG_LOW) ? 1 : 0, (p.flags & LOWBAT_FLAG_ALARM) ? 1 : 0);
 }
 
+/**
+ * @brief [Module.to_text] 警報・残量低下のときだけ LCD 用の 1 行にする（平常時は 0 文字）。
+ */
 static int lowbat_to_text(const uint8_t *data, size_t len, char *out, size_t cap)
 {
     if (len != sizeof(LowbatPayload)) return 0;

@@ -15,6 +15,7 @@ var _rate_since := 0
 var _last_rx_msec := -1
 
 
+## 画面を組み立て、受信ノードを追加して受信を始める。
 func _ready() -> void:
 	_build_ui()
 	_receiver = GatewayReceiver.new()
@@ -22,6 +23,7 @@ func _ready() -> void:
 	add_child(_receiver)
 
 
+## 毎フレーム、受信レートを計算して状態表示（待受中・受信中・途絶）を更新し、各 node の途絶表示も更新する。
 func _process(_delta: float) -> void:
 	var now := Time.get_ticks_msec()
 	if now - _rate_since >= 1000:
@@ -44,6 +46,7 @@ func _process(_delta: float) -> void:
 		card.refresh_stale(now, STALE_SEC)
 
 
+## 1 パケット受信ごとに呼ばれる。初めての node ならカードを番号順に追加し、最新値と生の JSON を表示する。
 func _on_packet(node_id: int, data: Dictionary) -> void:
 	_rate_count += 1
 	_last_rx_msec = Time.get_ticks_msec()
@@ -61,6 +64,7 @@ func _on_packet(node_id: int, data: Dictionary) -> void:
 	_raw.text = _receiver.last_text
 
 
+## 画面（タイトル・状態行・node カード欄・最後の JSON）をコードで組み立てる。
 func _build_ui() -> void:
 	var bg := ColorRect.new()
 	bg.color = Color(0.11, 0.12, 0.14)
@@ -118,6 +122,7 @@ class NodeCard extends PanelContainer:
 	var _tilt: TiltView
 	var _extra: Label
 
+	## node 1 台分のカード（タイトル・受信情報・加速度バー・傾き表示・その他の値）を作る。
 	func _init(node_id: int) -> void:
 		_id = node_id
 		_last_msec = Time.get_ticks_msec()
@@ -175,12 +180,14 @@ class NodeCard extends PanelContainer:
 		_extra = Label.new()
 		v.add_child(_extra)
 
+	## 単色・角丸のスタイルを作る（バーの背景と中身に使う）。
 	static func _flat(color: Color) -> StyleBoxFlat:
 		var sb := StyleBoxFlat.new()
 		sb.bg_color = color
 		sb.set_corner_radius_all(3)
 		return sb
 
+	## 受信した JSON をカードに反映する（受信情報・加速度・電池・振動・飲酒の状態）。
 	func apply(data: Dictionary) -> void:
 		_last_msec = Time.get_ticks_msec()
 		_info.text = "seq %d   rx %d   lost %d" % [int(data.get("seq", 0)), int(data.get("rx", 0)), int(data.get("lost", 0))]
@@ -213,6 +220,7 @@ class NodeCard extends PanelContainer:
 			lines.append("drink %s  tilt %d deg  gulps %d" % [state, int(d.get("tilt", 0)), int(d.get("gulps", 0))])
 		_extra.text = "\n".join(lines)
 
+	## 最後の受信から stale_sec 以上経っていればタイトルを赤くして「(no data)」を出す。
 	func refresh_stale(now_msec: int, stale_sec: float) -> void:
 		var stale := now_msec - _last_msec > stale_sec * 1000
 		_title.text = "Node %d%s" % [_id, "   (no data)" if stale else ""]
@@ -227,13 +235,16 @@ class TiltView extends Control:
 
 	var _pos := Vector2.ZERO
 
+	## 円が収まる最小サイズを設定する。
 	func _init() -> void:
 		custom_minimum_size = Vector2(RADIUS * 2 + 8, RADIUS * 2 + 8)
 
+	## 加速度の x / y 成分（重力の向き）で点の位置を更新して描き直す。
 	func set_accel(x: float, y: float) -> void:
 		_pos = Vector2(x, y).limit_length(1.0)
 		queue_redraw()
 
+	## 円・十字線・現在の傾きの点を描く。
 	func _draw() -> void:
 		var c := size / 2
 		draw_circle(c, RADIUS, Color(0.2, 0.22, 0.26))

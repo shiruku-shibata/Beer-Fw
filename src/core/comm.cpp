@@ -11,12 +11,21 @@
 
 static char s_selfMac[18] = "";
 
+/**
+ * @brief MAC アドレス 6 バイトを "AA:BB:CC:DD:EE:FF" 形式の文字列にする。
+ *
+ * @param mac 6 バイトの MAC
+ * @param out 出力先（18 バイト以上）
+ */
 void comm_mac_to_str(const uint8_t *mac, char *out)
 {
     snprintf(out, 18, "%02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 }
 
+/**
+ * @brief 自機の MAC 文字列を返す（comm_init() 後に有効）。
+ */
 const char *comm_self_mac(void)
 {
     return s_selfMac;
@@ -26,6 +35,11 @@ const char *comm_self_mac(void)
 // =============================================
 // node 単体動作: WiFi を起動しない（省電力）
 // =============================================
+/**
+ * @brief [単体動作] WiFi を起動せずに初期化を終える。
+ *
+ * @return 常に true
+ */
 bool comm_init(void)
 {
     strncpy(s_selfMac, "standalone", sizeof(s_selfMac) - 1);
@@ -33,9 +47,21 @@ bool comm_init(void)
     return true;
 }
 
+/**
+ * @brief [単体動作] 送信しない。常に false。
+ */
 bool comm_send(const uint8_t *, size_t) { return false; }
+/**
+ * @brief [単体動作] 送信しないので常に false。
+ */
 bool comm_last_send_ok(void) { return false; }
+/**
+ * @brief [node] 受信機能はないので常に false。
+ */
 bool comm_receive(uint8_t *, uint8_t *, size_t *) { return false; }
+/**
+ * @brief [node] 受信しないので常に 0。
+ */
 uint32_t comm_dropped_count(void) { return 0; }
 
 #elif defined(ROLE_NODE)
@@ -105,6 +131,12 @@ static void radioDown(void)
     s_radioUp = false;
 }
 
+/**
+ * @brief [node] WiFi を STA モードで用意し、ESP-NOW を起動して gateway をピア登録する。
+ *        低電力通信（COMM_LOW_POWER）では確認後すぐに無線を止める。
+ *
+ * @return 成功時 true
+ */
 bool comm_init(void)
 {
     WiFi.mode(WIFI_STA);
@@ -124,6 +156,14 @@ bool comm_init(void)
     return true;
 }
 
+/**
+ * @brief [node] gateway へ 1 パケット送る。
+ *        低電力通信では無線を起動して送り、送信完了（最大 COMM_SEND_TIMEOUT_MS）を待ってから止める。
+ *
+ * @param data 送信データ
+ * @param len  バイト数（1〜PROTOCOL_MAX_PAYLOAD）
+ * @return esp_now_send() が受け付けたら true（届いたかは comm_last_send_ok()）
+ */
 bool comm_send(const uint8_t *data, size_t len)
 {
     if (len == 0 || len > PROTOCOL_MAX_PAYLOAD) return false;
@@ -145,12 +185,21 @@ bool comm_send(const uint8_t *data, size_t len)
     return ok;
 }
 
+/**
+ * @brief [node] 直前の送信で gateway から受信確認（ACK）が返ったか。
+ */
 bool comm_last_send_ok(void)
 {
     return s_lastSendOk;
 }
 
+/**
+ * @brief [node] 受信機能はないので常に false。
+ */
 bool comm_receive(uint8_t *, uint8_t *, size_t *) { return false; }
+/**
+ * @brief [node] 受信しないので常に 0。
+ */
 uint32_t comm_dropped_count(void) { return 0; }
 
 #else
@@ -190,6 +239,11 @@ static void onDataReceived(const uint8_t *mac, const uint8_t *data, int len)
     portEXIT_CRITICAL(&s_mux);
 }
 
+/**
+ * @brief [gateway] WiFi を隠し AP（COMM_ESPNOW_CHANNEL）で起動し、ESP-NOW の受信を始める。
+ *
+ * @return 成功時 true
+ */
 bool comm_init(void)
 {
     // AP モードで起動（ESP-NOW 安定動作のため）
@@ -209,6 +263,14 @@ bool comm_init(void)
     return true;
 }
 
+/**
+ * @brief [gateway] 受信リングバッファから最も古い 1 件を取り出す。
+ *
+ * @param mac 送信元 MAC の出力先（6 バイト）
+ * @param buf データの出力先（PROTOCOL_MAX_PAYLOAD バイト以上）
+ * @param len 受信バイト数の出力先
+ * @return 取り出せたら true、空なら false
+ */
 bool comm_receive(uint8_t *mac, uint8_t *buf, size_t *len)
 {
     bool got = false;
@@ -227,12 +289,21 @@ bool comm_receive(uint8_t *mac, uint8_t *buf, size_t *len)
     return got;
 }
 
+/**
+ * @brief [gateway] リングバッファが満杯で捨てたパケットの累計数。
+ */
 uint32_t comm_dropped_count(void)
 {
     return s_dropped;
 }
 
+/**
+ * @brief [gateway] 送信機能はないので常に false。
+ */
 bool comm_send(const uint8_t *, size_t) { return false; }
+/**
+ * @brief [gateway] 送信しないので常に false。
+ */
 bool comm_last_send_ok(void) { return false; }
 
 #endif
