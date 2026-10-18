@@ -4,7 +4,7 @@
  * 【シリアル出力】1 パケット = 1 行の JSON。ログ行は "#" で始まる。
  * {"node":1,"mac":"AA:BB:CC:DD:EE:FF","seq":42,"t":12345,"rx":43,"lost":0,"accel":{"x":0.1234,"y":-0.4567,"z":0.9789}}
  *
- * 【操作】ボタン A で表示する node を切り替える
+ * 【操作】ボタン A で表示する node を切り替える。ボタン B で AP MAC 表示と切り替える
  */
 
 #include "app/app.h"
@@ -12,6 +12,7 @@
 #include <Arduino.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include "config.h"
 #include "core/comm.h"
 #include "core/display.h"
@@ -23,8 +24,17 @@
 // node 管理テーブル
 // =============================================
 typedef struct {
+    const char *mac;   // "AA:BB:CC:DD:EE:FF"
+    uint8_t     nodeId;
+} NodeMapEntry;
+
+// config.h の GATEWAY_NODE_TABLE。末尾は番兵（nodeId = 0）
+static const NodeMapEntry NODE_MAP[] = { GATEWAY_NODE_TABLE {nullptr, 0} };
+
+typedef struct {
     uint8_t  mac[6];
-    uint8_t  nodeId;
+    uint8_t  mappedId;   // 対応表の番号。0 = 表にない（パケットの node_id を使う）
+    uint8_t  nodeId;     // 出力する番号
     uint16_t lastSeq;
     uint32_t rxCount;
     uint32_t lostCount;
@@ -36,14 +46,31 @@ static NodeEntry s_nodes[GATEWAY_MAX_NODES] = {};
 static uint8_t   s_nodeCount  = 0;
 static uint8_t   s_dispNode   = 0;
 static bool      s_dispDirty  = false;
+static bool      s_showInfo   = false;   // ボタン B の AP MAC 表示中
 static uint32_t  s_lastDropped = 0;
 
 /**
- * @brief MAC で node を探し、なければ追加する。
+ * @brief 対応表から MAC に割り当てた番号を探す。
  *
+ * @param macStr "AA:BB:CC:DD:EE:FF" 形式（大文字小文字は区別しない）
+ * @return 番号。表になければ 0
+ */
+static uint8_t lookupMappedId(const char *macStr)
+{
+    for (const NodeMapEntry *e = NODE_MAP; e->nodeId != 0; e++) {
+        if (strcasecmp(e->mac, macStr) == 0) return e->nodeId;
+    }
+    return 0;
+}
+
+/**
+ * @brief MAC で node を探し、なければ対応表の番号を引いて追加する。
+ *
+ * @param mac    送信元 MAC
+ * @param nodeId パケットの node_id（表にない node の番号に使う）
  * @return インデックス。テーブルが満杯なら -1
  */
-static int findOrAddNode(const uint8_t *mac)
+static int findOrAddNode(const uint8_t *mac, uint8_t nodeId)
 {
     for (int i = 0; i < s_nodeCount; i++) {
         if (memcmp(s_nodes[i].mac, mac, 6) == 0) return i;
@@ -51,13 +78,33 @@ static int findOrAddNode(const uint8_t *mac)
     if (s_nodeCount >= GATEWAY_MAX_NODES) return -1;
 
     int idx = s_nodeCount++;
-    memset(&s_nodes[idx], 0, sizeof(NodeEntry));
-    memcpy(s_nodes[idx].mac, mac, 6);
+    NodeEntry &node = s_nodes[idx];
+    memset(&node, 0, sizeof(NodeEntry));
+    memcpy(node.mac, mac, 6);
 
     char macStr[18];
     comm_mac_to_str(mac, macStr);
-    LOG_I("New node #%d: %s", idx + 1, macStr);
+    node.mappedId = lookupMappedId(macStr);
+    if (node.mappedId != 0) {
+        LOG_I("New node #%d: %s -> node %u (table)", idx + 1, macStr, node.mappedId);
+    } else {
+        LOG_W("New node #%d: %s not in GATEWAY_NODE_TABLE, using NODE_ID %u. Add: {\"%s\", %u},",
+              idx + 1, macStr, nodeId, macStr, nodeId);
+    }
     return idx;
+}
+
+/**
+ * @brief 対応表に同じ MAC・同じ番号が 2 回出ていたら警告する。
+ */
+static void checkNodeMap(void)
+{
+    for (const NodeMapEntry *a = NODE_MAP; a->nodeId != 0; a++) {
+        for (const NodeMapEntry *b = a + 1; b->nodeId != 0; b++) {
+            if (strcasecmp(a->mac, b->mac) == 0) LOG_W("GATEWAY_NODE_TABLE: duplicate MAC %s", a->mac);
+            if (a->nodeId == b->nodeId) LOG_W("GATEWAY_NODE_TABLE: duplicate node %u", a->nodeId);
+        }
+    }
 }
 
 /**
@@ -95,7 +142,7 @@ static void sendJson(const NodeEntry &node, const PacketHeader *hdr, const uint8
 
     int pos = snprintf(line, sizeof(line),
                        "{\"node\":%u,\"mac\":\"%s\",\"seq\":%u,\"t\":%lu,\"rx\":%lu,\"lost\":%lu",
-                       hdr->node_id, macStr, hdr->seq, (unsigned long)hdr->time_ms,
+                       node.nodeId, macStr, hdr->seq, (unsigned long)hdr->time_ms,
                        (unsigned long)node.rxCount, (unsigned long)node.lostCount);
 
     forEachRecord(data, len, [&](const Module *m, const RecordHeader *rec, const uint8_t *body) {
@@ -118,7 +165,7 @@ static void sendJson(const NodeEntry &node, const PacketHeader *hdr, const uint8
         line[pos]   = '\0';
         Serial.println(line);
     } else {
-        LOG_W("JSON line too long, dropped (node %u)", hdr->node_id);
+        LOG_W("JSON line too long, dropped (node %u)", node.nodeId);
     }
 }
 
@@ -137,7 +184,7 @@ static void handlePacket(const uint8_t *mac, const uint8_t *data, size_t len)
         return;
     }
 
-    int idx = findOrAddNode(mac);
+    int idx = findOrAddNode(mac, hdr->node_id);
     if (idx < 0) {
         LOG_W("Node table full, packet dropped");
         return;
@@ -148,7 +195,7 @@ static void handlePacket(const uint8_t *mac, const uint8_t *data, size_t len)
         uint16_t gap = (uint16_t)(hdr->seq - node.lastSeq - 1);
         if (gap < 1000) node.lostCount += gap;   // 大きな飛びは node の再起動とみなす
     }
-    node.nodeId  = hdr->node_id;
+    node.nodeId  = (node.mappedId != 0) ? node.mappedId : hdr->node_id;
     node.lastSeq = hdr->seq;
     node.rxCount++;
     memcpy(node.data, data, len);
@@ -156,7 +203,7 @@ static void handlePacket(const uint8_t *mac, const uint8_t *data, size_t len)
 
     sendJson(node, hdr, data, len);
 
-    if (idx == s_dispNode) s_dispDirty = true;
+    if (idx == s_dispNode && !s_showInfo) s_dispDirty = true;
 }
 
 /**
@@ -200,11 +247,33 @@ static void drawNode(uint8_t idx)
     display_footer();
 }
 
+/**
+ * @brief 自機の AP MAC（node の COMM_GATEWAY_MAC に設定する値）と受信中の node 数を描く（ボタン B）。
+ */
+static void drawInfo(void)
+{
+    char buf[40];
+
+    display_begin("== GATEWAY ==", TFT_YELLOW);
+    display_print("AP MAC:\n", 2, TFT_WHITE);
+    snprintf(buf, sizeof(buf), "%s\n", comm_self_mac());
+    display_print(buf, 2, TFT_YELLOW);
+    snprintf(buf, sizeof(buf), "Nodes: %u/%d  ch %d\n", s_nodeCount, GATEWAY_MAX_NODES, COMM_ESPNOW_CHANNEL);
+    display_print(buf, 2, TFT_WHITE);
+    display_print("= COMM_GATEWAY_MAC\n", 1, TFT_LIGHTGREY);
+    display_print("B: back", 1, TFT_DARKGREY);
+    display_footer();
+}
+
+/**
+ * @brief gateway の初期化。WiFi AP と ESP-NOW を起動し、AP MAC を 3 秒表示する。
+ */
 void app_init(void)
 {
     if (!comm_init()) {
         display_fatal("ESP-NOW\nFAILED");
     }
+    checkNodeMap();
 
     // 起動時に AP MAC を表示（3 秒）
     display_begin("AP MAC:", TFT_YELLOW);
@@ -216,12 +285,27 @@ void app_init(void)
     drawWaiting();
 }
 
+/**
+ * @brief gateway のメインループ。ボタン A で表示 node を切り替え、受信キューを空になるまで処理し、
+ *        取りこぼしを警告し、表示中の node が更新されていれば描き直す。
+ */
 void app_loop(void)
 {
-    // ボタン A: 表示する node を切り替える
-    if (M5.BtnA.wasPressed() && s_nodeCount > 1) {
-        s_dispNode  = (s_dispNode + 1) % s_nodeCount;
+    // ボタン B: AP MAC 表示の切り替え
+    if (M5.BtnB.wasPressed()) {
+        s_showInfo  = !s_showInfo;
         s_dispDirty = true;
+    }
+
+    // ボタン A: 表示する node を切り替える（AP MAC 表示中なら通常表示に戻る）
+    if (M5.BtnA.wasPressed()) {
+        if (s_showInfo) {
+            s_showInfo  = false;
+            s_dispDirty = true;
+        } else if (s_nodeCount > 1) {
+            s_dispNode  = (s_dispNode + 1) % s_nodeCount;
+            s_dispDirty = true;
+        }
     }
 
     // 受信キューを空になるまで処理
@@ -240,7 +324,9 @@ void app_loop(void)
 
     uint32_t now = millis();
     if (s_dispDirty && display_due(now)) {
-        drawNode(s_dispNode);
+        if (s_showInfo)          drawInfo();
+        else if (s_nodeCount > 0) drawNode(s_dispNode);
+        else                     drawWaiting();
         s_dispDirty = false;
     }
 

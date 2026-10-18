@@ -24,6 +24,12 @@ typedef struct __attribute__((packed)) {
 static AccelPayload s_latest = {};
 static bool         s_valid  = false;
 
+/**
+ * @brief 最後に取得した加速度を返す（他モジュール向け）。
+ *
+ * @param x, y, z 出力先 [g]
+ * @return 一度でも取得できていれば true
+ */
 bool accel_get(float *x, float *y, float *z)
 {
     *x = s_latest.x;
@@ -32,11 +38,17 @@ bool accel_get(float *x, float *y, float *z)
     return s_valid;
 }
 
+/**
+ * @brief [Module.init] 内蔵 IMU が使えるか確認する。
+ */
 static bool accel_init(void)
 {
     return M5.Imu.isEnabled();
 }
 
+/**
+ * @brief [Module.update] IMU から加速度を読み、最新値を更新する。
+ */
 static void accel_update(void)
 {
     if (M5.Imu.getAccelData(&s_latest.x, &s_latest.y, &s_latest.z)) {
@@ -44,6 +56,9 @@ static void accel_update(void)
     }
 }
 
+/**
+ * @brief [Module.encode] 最新の加速度を送信用の 12 バイト（float x, y, z）にする。
+ */
 static size_t accel_encode(uint8_t *buf, size_t cap)
 {
     if (cap < sizeof(AccelPayload)) return 0;
@@ -51,6 +66,9 @@ static size_t accel_encode(uint8_t *buf, size_t cap)
     return sizeof(AccelPayload);
 }
 
+/**
+ * @brief [Module.to_json] 受信データを "accel":{"x":..,"y":..,"z":..} にする。
+ */
 static int accel_to_json(const uint8_t *data, size_t len, char *out, size_t cap)
 {
     if (len != sizeof(AccelPayload)) return 0;
@@ -59,6 +77,9 @@ static int accel_to_json(const uint8_t *data, size_t len, char *out, size_t cap)
     return snprintf(out, cap, "\"accel\":{\"x\":%.4f,\"y\":%.4f,\"z\":%.4f}", p.x, p.y, p.z);
 }
 
+/**
+ * @brief [Module.to_text] 受信データを LCD 用の 3 行（X / Y / Z）にする。
+ */
 static int accel_to_text(const uint8_t *data, size_t len, char *out, size_t cap)
 {
     if (len != sizeof(AccelPayload)) return 0;

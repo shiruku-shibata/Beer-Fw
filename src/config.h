@@ -113,6 +113,15 @@
 
 #define GATEWAY_MAX_NODES       8       // gateway が同時に扱う node 数
 
+// gateway の node 対応表（MAC → JSON の "node" 番号 1〜255）
+// 表にある node は、書き込み時の NODE_ID に関係なくこの番号で出力する。
+// 表にない node は NODE_ID のまま出力し、追加用の 1 行をログに出す。
+// MAC は node の B ボタンで出る My MAC（= STA MAC）。gateway のログにも出る。
+#ifndef GATEWAY_NODE_TABLE
+#define GATEWAY_NODE_TABLE \
+    {"64:B7:08:85:64:54", 1},   /* node（2026-10-18 登録） */
+#endif
+
 // =============================================
 // 電源
 // =============================================

@@ -37,9 +37,21 @@ void vibration_set_alarm(bool on);
 
 #else
 
+/**
+ * @brief [モジュール無効時] 何もしない。
+ */
 static inline void vibration_start(uint8_t, uint32_t) {}
+/**
+ * @brief [モジュール無効時] 何もしない。
+ */
 static inline void vibration_stop(void) {}
+/**
+ * @brief [モジュール無効時] 常に false。
+ */
 static inline bool vibration_is_active(void) { return false; }
+/**
+ * @brief [モジュール無効時] 何もしない。
+ */
 static inline void vibration_set_alarm(bool) {}
 
 #endif

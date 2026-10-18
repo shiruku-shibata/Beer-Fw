@@ -12,12 +12,18 @@
 #include "core/system.h"
 #include "app/app.h"
 
+/**
+ * @brief 起動時に 1 回呼ばれる。共通部分→役割別（node / gateway）の順に初期化する。
+ */
 void setup()
 {
     system_init();
     app_init();
 }
 
+/**
+ * @brief 起動後に繰り返し呼ばれる。共通の周期処理と役割別の処理を 1 回ずつ実行する。
+ */
 void loop()
 {
     system_update();

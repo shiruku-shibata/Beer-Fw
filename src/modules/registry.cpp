@@ -45,6 +45,12 @@ const Module *const g_modules[] = {
 
 const size_t g_moduleCount = sizeof(g_modules) / sizeof(g_modules[0]) - 1;
 
+/**
+ * @brief モジュール ID から登録済みモジュールを探す。
+ *
+ * @param id MODULE_ID_*
+ * @return 見つからなければ nullptr
+ */
 const Module *module_find(uint8_t id)
 {
     for (size_t i = 0; i < g_moduleCount; i++) {

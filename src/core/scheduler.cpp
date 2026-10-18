@@ -6,6 +6,9 @@
 static bool     s_active[MODULE_MAX]  = {};
 static uint32_t s_lastRun[MODULE_MAX] = {};
 
+/**
+ * @brief 登録された全モジュールの init() を呼ぶ。失敗したモジュールは無効にして以後呼ばない。
+ */
 void scheduler_init(void)
 {
     if (g_moduleCount > MODULE_MAX) {
@@ -23,6 +26,11 @@ void scheduler_init(void)
     }
 }
 
+/**
+ * @brief 周期（period_ms）が来たモジュールの update() を呼ぶ。
+ *
+ * @param now 現在時刻 [ms]
+ */
 void scheduler_run(uint32_t now)
 {
     for (size_t i = 0; i < g_moduleCount && i < MODULE_MAX; i++) {
@@ -37,6 +45,13 @@ void scheduler_run(uint32_t now)
     }
 }
 
+/**
+ * @brief 次にいずれかのモジュールの update() が必要になるまでの時間を求める。
+ *
+ * @param now 現在時刻 [ms]
+ * @param max_ms 上限 [ms]
+ * @return 待ち時間 [ms]（0 = すぐ）
+ */
 uint32_t scheduler_ms_until_next(uint32_t now, uint32_t max_ms)
 {
     uint32_t wait = max_ms;
@@ -51,6 +66,9 @@ uint32_t scheduler_ms_until_next(uint32_t now, uint32_t max_ms)
     return wait;
 }
 
+/**
+ * @brief light sleep できない状態（busy() が true）のモジュールがあるか。
+ */
 bool scheduler_busy(void)
 {
     for (size_t i = 0; i < g_moduleCount && i < MODULE_MAX; i++) {
@@ -59,6 +77,9 @@ bool scheduler_busy(void)
     return false;
 }
 
+/**
+ * @brief すぐ送信すべき変化を持つモジュールがあるか。各モジュールのイベントフラグは下ろす。
+ */
 bool scheduler_take_events(void)
 {
     bool any = false;
@@ -68,6 +89,11 @@ bool scheduler_take_events(void)
     return any;
 }
 
+/**
+ * @brief モジュールが初期化に成功し動作中か。
+ *
+ * @param index g_modules のインデックス
+ */
 bool scheduler_is_active(size_t index)
 {
     return index < MODULE_MAX && s_active[index];

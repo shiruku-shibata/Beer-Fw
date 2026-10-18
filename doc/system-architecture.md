@@ -136,8 +136,10 @@ gateway は最大 8 台の node を MAC で識別し、受信パケットごと�
 
 - 受信コールバックは `COMM_RX_QUEUE_LEN`（16）段のリングバッファにパケットを積むだけ。コールバックと loop の間は `portMUX` で排他する。満杯時は破棄して数え、loop 側で警告を出す。
 - loop はバッファが空になるまで取り出し、ヘッダを検証して node 表に記録し、JSON を出力する。
+- JSON の `node` は、MAC が `GATEWAY_NODE_TABLE`（`config.h`）にあればその番号、なければパケットの `node_id`。表は node を初めて受信したときに 1 回だけ引く。表にない node はログに追加用の 1 行を出す。
 - `seq` の飛びから欠落数（`lost`）を数える。1000 以上の飛びは node の再起動とみなして数えない。
 - ボタン A で表示する node を切り替える。LCD は表示中の node が更新されたときだけ、最短 100 ms 間隔で描き直す。
+- ボタン B で AP MAC 表示（AP MAC・受信中の node 数・チャンネル）と切り替える。node 側もボタン B で自機 MAC・`NODE_ID`・送信先 gateway MAC を表示する。
 
 ## 振動モジュール（Vibration Hat）
 
@@ -257,6 +259,8 @@ gateway は知らない `module_id` のレコードを `length` で読み飛ば�
 | WiFi WebSocket | `WebSocketPeer` | WebSocket サーバーを追加 | UDP と同じチャンネル制約に加え、通信のオーバーヘッドが大きい |
 
 どの方式でも、Godot 側は「1 メッセージ = 1 パケット分の JSON」を `node` ごとに受け取る形に揃える。
+
+接続確認用に「USB シリアル + PC ブリッジ」を実装済み（`tools/`・`godot/`）。手順は [godot-connection-test.md](godot-connection-test.md)。
 
 ## 現状の課題
 

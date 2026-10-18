@@ -1,0 +1,20 @@
+; Engine configuration file.
+
+config_version=5
+
+[application]
+
+config/name="Gateway Connection Test"
+config/description="M5StickC gateway の JSON を UDP で受けて表示する接続確認用プロジェクト"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+
+[display]
+
+window/size/viewport_width=960
+window/size/viewport_height=600
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
