@@ -21,17 +21,30 @@
 // =============================================
 // モジュール有効/無効
 // =============================================
+// 汎用モジュール（センサー・出力・電池監視）は既定で有効。
+// ゲーム専用モジュールは既定で無効にし、ゲームごとの環境（platformio.ini）で有効にする。
+// gateway は受信データを JSON にするため、ゲーム専用モジュールもすべて有効にする
+// （gateway はモジュールの init / update を呼ばないので、センサーや振動は動かない）。
+#if defined(ROLE_GATEWAY)
+#define MODULE_GAME_DEFAULT     1
+#else
+#define MODULE_GAME_DEFAULT     0
+#endif
+
+// ---- 汎用 ----
 #ifndef MODULE_ACCEL_ENABLE
 #define MODULE_ACCEL_ENABLE     1
 #endif
 #ifndef MODULE_VIBRATION_ENABLE
 #define MODULE_VIBRATION_ENABLE 1       // Vibration Hat（U159）
 #endif
-#ifndef MODULE_DRINK_ENABLE
-#define MODULE_DRINK_ENABLE     1       // 飲酒検出（accel + vibration が必要）
-#endif
 #ifndef MODULE_LOWBAT_ENABLE
 #define MODULE_LOWBAT_ENABLE    1       // 電池残量監視（20% フラグ・切れ警報。vibration が必要）
+#endif
+
+// ---- ゲーム専用 ----
+#ifndef MODULE_DRINK_ENABLE
+#define MODULE_DRINK_ENABLE     MODULE_GAME_DEFAULT   // 飲酒検出・ビールジョッキ（accel + vibration が必要）
 #endif
 
 // =============================================
