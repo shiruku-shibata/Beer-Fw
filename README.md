@@ -33,11 +33,34 @@ pio device monitor                                             # シリアル出
 
 ジョッキ側の送信先は `src/config.h` の `COMM_GATEWAY_MAC`。受信機の起動画面に出る AP MAC を設定する。
 
+### node 番号を MAC で固定する
+
+`src/config.h` の `GATEWAY_NODE_TABLE` に MAC と番号を書いて gateway を書き込むと、JSON の `node` はその番号になる。node 側は全台 `NODE_ID` を変えずに同じファームを書き込めばよい。
+
+```c
+#define GATEWAY_NODE_TABLE \
+    {"AA:BB:CC:DD:EE:01", 1}, \
+    {"AA:BB:CC:DD:EE:02", 2},
+```
+
+- MAC はチップ固有で、再起動や書き直しでは変わらない。node の B ボタンで出る `My MAC`（起動時にも 2 秒出る）を使う。
+- 表にない node は書き込み時の `NODE_ID` のまま出力する。gateway のログに `Add: {"AA:BB:CC:DD:EE:FF", 1},` と表に足す 1 行が出るので、それをコピーすればよい。
+- 同じ MAC や同じ番号が表に 2 回あると、gateway の起動時に警告が出る。
+
 ## 使い方
 
 1. ジョッキを机にまっすぐ置き、A ボタンを押す（姿勢の基準を記録して検出開始）
 2. 飲む（傾ける）と振動する
 3. A ボタン短押しで基準の取り直し、1 秒以上の長押しで停止
+
+B ボタン（右側面）を押すと、MAC 表示と通常表示が切り替わる。
+
+| 機器 | B ボタンで出る内容 |
+| --- | --- |
+| node / mug | 自機の MAC（`GATEWAY_NODE_TABLE` に書く値）、`NODE_ID`、送信先の gateway MAC |
+| gateway | AP MAC（node の `COMM_GATEWAY_MAC` に書く値）、受信中の node 数、チャンネル |
+
+node は画面が自動で消えると通常表示に戻る。gateway は A ボタンでも通常表示に戻る。
 
 ## 受信データ（Godot・PC 側向け）
 
@@ -84,7 +107,7 @@ func _on_packet(node_id: int, data: Dictionary) -> void:
 
 | キー | 型 | 内容 |
 | --- | --- | --- |
-| `node` | int | node の ID（1〜255）。書き込み時の `NODE_ID`。プレイヤー番号などに使う |
+| `node` | int | node の ID（1〜255）。`GATEWAY_NODE_TABLE` にある node はその番号、ない node は書き込み時の `NODE_ID`。プレイヤー番号などに使う |
 | `mac` | string | node の MAC アドレス |
 | `seq` | int | 送信ごとに +1（0〜65535 で一周）。node が再起動すると 0 に戻る |
 | `t` | int | node の起動からの経過時間 [ms] |

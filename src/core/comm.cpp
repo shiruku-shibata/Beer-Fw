@@ -35,15 +35,20 @@ const char *comm_self_mac(void)
 // =============================================
 // node 単体動作: WiFi を起動しない（省電力）
 // =============================================
+#include <esp_system.h>
+
 /**
- * @brief [単体動作] WiFi を起動せずに初期化を終える。
+ * @brief [単体動作] WiFi を起動せずに初期化を終える。自機 MAC は eFuse から読む
+ *        （通信ありで書き込んだときに gateway が見る STA MAC と同じ値）。
  *
  * @return 常に true
  */
 bool comm_init(void)
 {
-    strncpy(s_selfMac, "standalone", sizeof(s_selfMac) - 1);
-    LOG_I("Comm disabled (standalone)");
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    comm_mac_to_str(mac, s_selfMac);
+    LOG_I("Comm disabled (standalone). STA MAC: %s", s_selfMac);
     return true;
 }
 
