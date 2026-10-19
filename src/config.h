@@ -122,6 +122,15 @@
     {"64:B7:08:85:64:54", 1},   /* node（2026-10-18 登録） */
 #endif
 
+// gateway 自身の加速度。node の JSON と同じシリアルに "node":0 の行として出す
+#ifndef GATEWAY_ACCEL_ENABLE
+#define GATEWAY_ACCEL_ENABLE    1
+#endif
+#ifndef GATEWAY_ACCEL_PERIOD_MS
+#define GATEWAY_ACCEL_PERIOD_MS 100     // 出力周期 [ms]（node の既定送信周期と同じ 10 Hz）
+#endif
+#define GATEWAY_SELF_NODE_ID    0       // gateway 自身の行の "node"（node は 1〜255 なので重ならない）
+
 // =============================================
 // 電源
 // =============================================
@@ -160,6 +169,9 @@
 #endif
 #if defined(ROLE_GATEWAY) && !COMM_ENABLE
 #error "gateway は COMM_ENABLE=1 が必要です"
+#endif
+#if defined(ROLE_GATEWAY) && GATEWAY_ACCEL_ENABLE && !MODULE_ACCEL_ENABLE
+#error "GATEWAY_ACCEL_ENABLE には MODULE_ACCEL_ENABLE が必要です"
 #endif
 #if MODULE_DRINK_ENABLE && !(MODULE_ACCEL_ENABLE && MODULE_VIBRATION_ENABLE)
 #error "MODULE_DRINK_ENABLE には MODULE_ACCEL_ENABLE と MODULE_VIBRATION_ENABLE が必要です"

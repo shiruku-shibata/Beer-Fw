@@ -132,6 +132,12 @@ gateway は最大 8 台の node を MAC で識別し、受信パケットごと�
 2. ESP-NOW を初期化し、受信コールバックを登録する。
 3. AP MAC を 3 秒表示する。node の `COMM_GATEWAY_MAC` にはこの AP MAC を設定する。
 
+**gateway 自身の加速度**（`GATEWAY_ACCEL_ENABLE`、既定 1）
+
+- 初期化時に加速度モジュール（`module_find(MODULE_ID_ACCEL)`）の `init()` だけを呼ぶ。他のモジュール（振動・電池監視など）は gateway では動かさない。IMU が使えなければ警告を出して無効にする。
+- loop で `GATEWAY_ACCEL_PERIOD_MS`（既定 100 ms）ごとに `update()` → `encode()` → `to_json()` を呼び、`"node":0` の JSON 1 行をシリアルへ出す。node の行と同じモジュールの関数を使うので、`accel` の形式は node と一致する。
+- node の受信処理を先に済ませてから出す。node が 1 台もいなくても出る。
+
 **受信処理**
 
 - 受信コールバックは `COMM_RX_QUEUE_LEN`（16）段のリングバッファにパケットを積むだけ。コールバックと loop の間は `portMUX` で排他する。満杯時は破棄して数え、loop 側で警告を出す。
@@ -239,11 +245,17 @@ gateway は知らない `module_id` のレコードを `length` で読み飛ば�
 
 | フィールド | 意味 |
 | --- | --- |
-| `node` | node の `NODE_ID`。書き込み時に決まる固定値なので、Godot 側のプレイヤー識別に使える |
-| `mac` | node の MAC |
+| `node` | node の番号。`GATEWAY_NODE_TABLE` にあればその番号、なければ `NODE_ID`。Godot 側のプレイヤー識別に使える。0 は gateway 自身の行 |
+| `mac` | node の MAC（`node` = 0 の行は gateway の AP MAC） |
 | `seq` / `t` | パケットのシーケンス番号と node 側の時刻 [ms] |
-| `rx` / `lost` | その node からの累計受信数と推定欠落数 |
+| `rx` / `lost` | その node からの累計受信数と推定欠落数（`node` = 0 の行には出ない） |
 | モジュールのキー | 各モジュールの `to_json()` が出す要素（`accel` など） |
+
+gateway 自身の加速度の行（`GATEWAY_ACCEL_PERIOD_MS` ごと）:
+
+```json
+{"node":0,"mac":"00:4B:12:A2:4C:5D","seq":7,"t":12345,"accel":{"x":0.0012,"y":-0.0034,"z":1.0011}}
+```
 
 ログ行はすべて `# ` で始まる。PC 側は `{` で始まる行だけを JSON として読めばよい。
 

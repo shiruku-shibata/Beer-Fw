@@ -3,6 +3,8 @@
  *
  * 【シリアル出力】1 パケット = 1 行の JSON。ログ行は "#" で始まる。
  * {"node":1,"mac":"AA:BB:CC:DD:EE:FF","seq":42,"t":12345,"rx":43,"lost":0,"accel":{"x":0.1234,"y":-0.4567,"z":0.9789}}
+ * gateway 自身の加速度は GATEWAY_ACCEL_PERIOD_MS ごとに "node":0 の行で出す（GATEWAY_ACCEL_ENABLE）。
+ * {"node":0,"mac":"<AP MAC>","seq":7,"t":12345,"accel":{"x":0.0012,"y":-0.0034,"z":1.0011}}
  *
  * 【操作】ボタン A で表示する node を切り替える。ボタン B で AP MAC 表示と切り替える
  */
@@ -19,6 +21,9 @@
 #include "core/log.h"
 #include "core/protocol.h"
 #include "modules/module.h"
+#if GATEWAY_ACCEL_ENABLE
+#include "modules/accel.h"
+#endif
 
 // =============================================
 // node 管理テーブル
@@ -206,6 +211,58 @@ static void handlePacket(const uint8_t *mac, const uint8_t *data, size_t len)
     if (idx == s_dispNode && !s_showInfo) s_dispDirty = true;
 }
 
+// =============================================
+// gateway 自身の加速度（"node":0 の行）
+// =============================================
+#if GATEWAY_ACCEL_ENABLE
+static const Module *s_selfAccel  = nullptr;   // 加速度モジュール。使えなければ nullptr
+static uint16_t      s_selfSeq    = 0;
+static uint32_t      s_selfLastTx = 0;
+
+/**
+ * @brief 加速度モジュールを gateway 用に初期化する。他のモジュール（振動など）は動かさない。
+ */
+static void selfAccelInit(void)
+{
+    const Module *m = module_find(MODULE_ID_ACCEL);
+    if (m == nullptr || (m->init != nullptr && !m->init())) {
+        LOG_W("Gateway accel unavailable, node %d disabled", GATEWAY_SELF_NODE_ID);
+        return;
+    }
+    s_selfAccel = m;
+    LOG_I("Gateway accel: node %d every %d ms", GATEWAY_SELF_NODE_ID, GATEWAY_ACCEL_PERIOD_MS);
+}
+
+/**
+ * @brief 出力周期が来たら加速度を読み、node の行と同じ形式の JSON 1 行（"node":0）をシリアルへ出す。
+ *
+ * @param now 現在時刻 [ms]
+ */
+static void selfAccelPoll(uint32_t now)
+{
+    if (s_selfAccel == nullptr || now - s_selfLastTx < GATEWAY_ACCEL_PERIOD_MS) return;
+    s_selfLastTx = now;
+
+    s_selfAccel->update();
+    float x, y, z;
+    if (!accel_get(&x, &y, &z)) return;   // まだ一度も読めていない
+
+    uint8_t data[PROTOCOL_MAX_PAYLOAD];
+    size_t  len = s_selfAccel->encode(data, sizeof(data));
+    if (len == 0) return;
+
+    char line[192];
+    int pos = snprintf(line, sizeof(line), "{\"node\":%d,\"mac\":\"%s\",\"seq\":%u,\"t\":%lu,",
+                       GATEWAY_SELF_NODE_ID, comm_self_mac(), s_selfSeq++, (unsigned long)now);
+    int n = s_selfAccel->to_json(data, len, line + pos, sizeof(line) - pos - 1);
+    if (n <= 0 || pos + n >= (int)sizeof(line) - 1) return;
+    pos += n;
+    line[pos++] = '}';
+    line[pos]   = '\0';
+    Serial.println(line);
+}
+#endif  // GATEWAY_ACCEL_ENABLE
+
 /**
  * @brief 受信待ち画面を描く。
  */
@@ -274,6 +331,9 @@ void app_init(void)
         display_fatal("ESP-NOW\nFAILED");
     }
     checkNodeMap();
+#if GATEWAY_ACCEL_ENABLE
+    selfAccelInit();
+#endif
 
     // 起動時に AP MAC を表示（3 秒）
     display_begin("AP MAC:", TFT_YELLOW);
@@ -323,6 +383,10 @@ void app_loop(void)
     }
 
     uint32_t now = millis();
+#if GATEWAY_ACCEL_ENABLE
+    selfAccelPoll(now);
+#endif
+
     if (s_dispDirty && display_due(now)) {
         if (s_showInfo)          drawInfo();
         else if (s_nodeCount > 0) drawNode(s_dispNode);

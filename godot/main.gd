@@ -223,7 +223,8 @@ class NodeCard extends PanelContainer:
 	## 最後の受信から stale_sec 以上経っていればタイトルを赤くして「(no data)」を出す。
 	func refresh_stale(now_msec: int, stale_sec: float) -> void:
 		var stale := now_msec - _last_msec > stale_sec * 1000
-		_title.text = "Node %d%s" % [_id, "   (no data)" if stale else ""]
+		var name := "Gateway" if _id == 0 else "Node %d" % _id   # node 0 = gateway 自身の加速度
+		_title.text = "%s%s" % [name, "   (no data)" if stale else ""]
 		_title.modulate = Color(1, 0.4, 0.4) if stale else Color(0.5, 1, 0.5)
 
 

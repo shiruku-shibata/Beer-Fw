@@ -127,6 +127,28 @@ func _on_packet(node_id: int, data: Dictionary) -> void:
 | `rx` | int | gateway がその node から受け取った累計パケット数 |
 | `lost` | int | 届かなかったパケットの累計数（`seq` の飛びから推定） |
 
+### gateway 自身の加速度（`node` = 0）
+
+gateway も自分の内蔵 IMU の加速度を、node の行と同じシリアルに 100 ms ごと（10 回/秒）に出す。`node` が 0 の行が gateway 自身。node の番号は 1〜255 なので重ならない。
+
+```json
+{"node":0,"mac":"00:4B:12:A2:4C:5D","seq":7,"t":12345,"accel":{"x":0.0012,"y":-0.0034,"z":1.0011}}
+```
+
+- `mac` は gateway の AP MAC、`seq` は gateway の行ごとに +1、`t` は gateway の起動からの経過時間 [ms]。
+- `accel` は node と同じ形式。`rx` / `lost` とほかのモジュールのキーは出ない。
+- node と区別したいときは `node_id == 0` で分ける。
+
+```gdscript
+func _on_packet(node_id: int, data: Dictionary) -> void:
+	if node_id == 0:
+		var a: Dictionary = data["accel"]   # gateway の傾き・揺れ
+		return
+	# ここから node のデータ
+```
+
+止めるときは `-DGATEWAY_ACCEL_ENABLE=0`、周期は `GATEWAY_ACCEL_PERIOD_MS`（`src/config.h`）で変える。
+
 ### センサー・機能ごとの項目
 
 | キー | 型 | 内容 |
@@ -147,6 +169,7 @@ func _on_packet(node_id: int, data: Dictionary) -> void:
 | --- | --- |
 | `node` | 100 ms ごと（10 回/秒） |
 | `mug` | 1 秒ごと |
+| （gateway 自身、`node` = 0） | 100 ms ごと（10 回/秒）。node の有無に関係なく出る |
 
 どちらの環境でも、飲み始め・飲み終わりや電池の警報など状態が変わったときは、間隔を待たずにすぐ送る。`mug` の `drink.tilt` や `accel` は 1 秒ごとにしか更新されないため、アニメーションを滑らかにしたいときは Godot 側で補間する。数秒（`mug` なら 3 秒程度）届かなければ、その node は切断・電源オフとみなしてよい。
 
