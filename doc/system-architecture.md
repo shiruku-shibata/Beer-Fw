@@ -132,6 +132,14 @@ gateway は最大 8 台の node を MAC で識別し、受信パケットごと�
 2. ESP-NOW を初期化し、受信コールバックを登録する。
 3. AP MAC を 3 秒表示する。node の `COMM_GATEWAY_MAC` にはこの AP MAC を設定する。
 
+**gateway 自身の加速度**（`GATEWAY_ACCEL_ENABLE`、既定 1）
+
+- 初期化時に加速度モジュール（`module_find(MODULE_ID_ACCEL)`）の `init()` だけを呼ぶ（`scheduler` は回さない）。他のモジュール（振動・電池監視など）は gateway では動かさない。IMU が使えなければ警告を出して無効にする。
+- loop で `GATEWAY_ACCEL_PERIOD_MS`（既定 100 ms）ごとに `update()` → `encode()` → `to_json()` を呼び、`"node":0` の JSON 1 行をシリアルへ出す。node の行と同じモジュールの関数を使うので、`accel` の形式は node と一致する。
+- node の受信処理を先に済ませてから出す。node が 1 台もいなくても出る。
+- `node_id` が 0 のパケットは gateway 自身の行と区別できないので、対応表に無ければ捨てる（警告は 5 秒に 1 回）。
+- `GATEWAY_ACCEL_PERIOD_MS` が 10 未満ならコンパイルエラーにする。
+
 **受信処理**
 
 - 受信コールバックは `COMM_RX_QUEUE_LEN`（16）段のリングバッファにパケットを積むだけ。コールバックと loop の間は `portMUX` で排他する。満杯時は破棄して数え、loop 側で警告を出す。
@@ -239,11 +247,17 @@ gateway は知らない `module_id` のレコードを `length` で読み飛ば�
 
 | フィールド | 意味 |
 | --- | --- |
-| `node` | node の `NODE_ID`。書き込み時に決まる固定値なので、Godot 側のプレイヤー識別に使える |
-| `mac` | node の MAC |
+| `node` | node の番号。`GATEWAY_NODE_TABLE` にあればその番号、なければ `NODE_ID`。Godot 側のプレイヤー識別に使える。0 は gateway 自身の行 |
+| `mac` | node の MAC（`node` = 0 の行は gateway の AP MAC） |
 | `seq` / `t` | パケットのシーケンス番号と node 側の時刻 [ms] |
-| `rx` / `lost` | その node からの累計受信数と推定欠落数 |
+| `rx` / `lost` | その node からの累計受信数と推定欠落数（`node` = 0 の行には出ない） |
 | モジュールのキー | 各モジュールの `to_json()` が出す要素（`accel` など） |
+
+gateway 自身の加速度の行（`GATEWAY_ACCEL_PERIOD_MS` ごと）:
+
+```json
+{"node":0,"mac":"00:4B:12:A2:4C:5D","seq":7,"t":12345,"accel":{"x":0.0012,"y":-0.0034,"z":1.0011}}
+```
 
 ログ行はすべて `# ` で始まる。PC 側は `{` で始まる行だけを JSON として読めばよい。
 
@@ -268,7 +282,7 @@ gateway は知らない `module_id` のレコードを `length` で読み飛ば�
 | --- | --- | --- | --- |
 | 送信周期 100 ms（10 Hz） | `config.h` `COMM_TX_PERIOD_MS`、`ACCEL_PERIOD_MS` | ゲーム入力としては遅延が大きい | 必要なレートが決まったら設定値を下げる |
 | gateway MAC がハードコード | `config.h` `COMM_GATEWAY_MAC` | gateway を交換すると全 node の再ビルドが必要 | ブロードキャスト送信、またはペアリング手順を検討する |
-| 115200 bps の帯域 | gateway シリアル | node の台数とレートを上げると詰まる（JSON 1 行 約 130 バイト） | ボーレートを上げる。または JSON を短くする |
+| 115200 bps の帯域 | gateway シリアル | node の台数とレートを上げると詰まる（JSON 1 行: `node` 環境の node 約 180 バイト、gateway 自身の行 約 105 バイト × 10 Hz。115200 bps ≒ 11.5 kB/s に対し、`node` 8 台 × 10 Hz で約 125 %） | ボーレートを上げる。または JSON を短くする |
 | LCD を毎回全面再描画 | `core/display` | ちらつき | 必要なら差分描画にする |
 | 実機での動作確認が未実施 | — | 新構成は 2026-10-04 時点でビルド確認のみ | node・gateway を書き込んで確認する |
 

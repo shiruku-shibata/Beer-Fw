@@ -121,11 +121,12 @@ def run_serial(args, sock, dest):
 # 疑似データ（実機なし）
 # =============================================
 def run_demo(args, sock, dest):
-    """gateway と同じ形式の JSON を node ごとに 10 Hz で送る。"""
+    """gateway と同じ形式の JSON を node ごとに 10 Hz で送る。gateway 自身の行（"node":0）も 10 Hz で送る。"""
     log("疑似データ: node %d 台 → UDP %s:%d" % (args.nodes, dest[0], dest[1]))
     period = 0.1
     seq = [0] * args.nodes
     gulps = [0] * args.nodes
+    gw_seq = 0
     start = time.monotonic()
     next_t = start
 
@@ -162,6 +163,21 @@ def run_demo(args, sock, dest):
             }
             sock.sendto(json.dumps(packet, separators=(",", ":")).encode("utf-8"), dest)
             seq[i] = (seq[i] + 1) % 65536
+
+        # gateway 自身の加速度（"node":0。机に置いたまま、わずかに揺れる）
+        gateway = {
+            "node": 0,
+            "mac": "00:00:00:DE:00:00",
+            "seq": gw_seq,
+            "t": int(t * 1000),
+            "accel": {
+                "x": round(random.uniform(-0.01, 0.01), 4),
+                "y": round(random.uniform(-0.01, 0.01), 4),
+                "z": round(1.0 + random.uniform(-0.01, 0.01), 4),
+            },
+        }
+        sock.sendto(json.dumps(gateway, separators=(",", ":")).encode("utf-8"), dest)
+        gw_seq = (gw_seq + 1) % 65536
 
         next_t += period
         time.sleep(max(0.0, next_t - time.monotonic()))

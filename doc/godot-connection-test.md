@@ -18,7 +18,7 @@ Godot 4 には標準のシリアル API がないため、PC 上のブリッジ�
 | ファイル | 役割 |
 | --- | --- |
 | `tools/serial_udp_bridge.py` | シリアル → UDP の中継。`{` で始まる行だけを送り、`#` 始まりのログはコンソールに出す。`--demo` で実機なしの疑似データを送る |
-| `godot/gateway_receiver.gd` | `GatewayReceiver` ノード。UDP を受けて JSON を読み、`packet_received(node_id, data)` を出す。ゲームでもそのまま使える |
+| `godot/gateway_receiver.gd` | `GatewayReceiver` ノード。UDP を受けて JSON を読み、node の行は `packet_received(node_id, data)`、gateway 自身の行（`node` = 0）は `gateway_received(data)` で出す。ゲームでもそのまま使える |
 | `godot/main.gd` / `main.tscn` | 接続確認画面。node ごとに seq・欠落数・加速度・傾き・電池・振動・飲酒検出を表示する |
 
 ## 必要なもの
@@ -34,7 +34,7 @@ Godot 4 には標準のシリアル API がないため、PC 上のブリッジ�
 python3 tools/serial_udp_bridge.py --demo --nodes 3
 ```
 
-Godot で `godot/project.godot` を開いて実行（F5）。Node 1〜3 のカードが並び、傾きの点が動けば Godot 側は正常。
+Godot で `godot/project.godot` を開いて実行（F5）。Gateway と Node 1〜3 のカードが並び、傾きの点が動けば Godot 側は正常（Gateway のカードは gateway 自身の加速度で、デモでは机に置いたままの値）。
 
 ### 2. 実機で確認する
 
@@ -48,14 +48,15 @@ Godot で `godot/project.godot` を開いて実行（F5）。Node 1〜3 のカ�
 
    USB シリアルを自動で探す。見つからないときや複数あるときは `--port /dev/cu.usbserial-XXXX` で指定する。`-v` を付けると転送した JSON も表示する。
 
-4. Godot で実行する。node を傾けるとカードの値が動く。
+4. Godot で実行する。node を傾けるとそのカードの値が動く。gateway 本体を傾けると Gateway のカード（`node` = 0）が動く。
 
 ## 画面の見方
 
 | 表示 | 正常 | 異常のときに疑うところ |
 | --- | --- | --- |
-| 上部のステータス | 緑。`pkt/s` が node 台数 × 送信レート（`node` は 10/s、`node_lowpower`・`mug` は 1/s ＋状態変化時） | 黄色「Listening…」: ブリッジ未起動、またはブリッジにデータが来ていない。赤: UDP ポートを他のアプリが使用中 |
+| 上部のステータス | 緑。`pkt/s` が node 台数 × 送信レート（`node` は 10/s、`node_lowpower`・`mug` は 1/s ＋状態変化時）＋ gateway 自身の 10/s | 黄色「Listening…」: ブリッジ未起動、またはブリッジにデータが来ていない。赤: UDP ポートを他のアプリが使用中 |
 | Node カードのタイトル | 緑 | 赤「(no data)」: その node から 1 秒以上届いていない。電源、`COMM_GATEWAY_MAC`、距離を確認 |
+| Gateway カード | 緑。gateway を傾けると動く | Gateway だけ出て Node が出ない: シリアルとブリッジは正常で、node 側（電源・`COMM_GATEWAY_MAC`・距離）の問題。Gateway が「(no data)」: gateway の IMU 初期化失敗（ログに `Gateway accel unavailable`）か `GATEWAY_ACCEL_ENABLE=0` |
 | `lost` | 0 のまま、たまに増える程度 | 増え続ける: 電波が弱い、または送信レートに対してシリアルが詰まっている |
 | `errors` | 0 | 増える: JSON として読めない行が来ている。ボーレート（115200）を確認 |
 

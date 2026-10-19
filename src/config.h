@@ -24,7 +24,8 @@
 // 汎用モジュール（センサー・出力・電池監視）は既定で有効。
 // ゲーム専用モジュールは既定で無効にし、ゲームごとの環境（platformio.ini）で有効にする。
 // gateway は受信データを JSON にするため、ゲーム専用モジュールもすべて有効にする
-// （gateway はモジュールの init / update を呼ばないので、センサーや振動は動かない）。
+// （gateway は scheduler を回さない。init / update を呼ぶのは GATEWAY_ACCEL_ENABLE 時の accel だけで、
+//   振動・電池監視などは動かない）。
 #if defined(ROLE_GATEWAY)
 #define MODULE_GAME_DEFAULT     1
 #else
@@ -103,7 +104,7 @@
 
 // node の送信先（gateway の AP MAC）
 #ifndef COMM_GATEWAY_MAC
-#define COMM_GATEWAY_MAC        {0x00, 0x4B, 0x12, 0xA0, 0x9A, 0x5D}
+#define COMM_GATEWAY_MAC        {0x00, 0x4B, 0x12, 0xA2, 0x4C, 0x5D}
 #endif
 
 // node の識別番号（1〜255）。個体ごとに build_flags で上書きする
@@ -121,6 +122,15 @@
 #define GATEWAY_NODE_TABLE \
     {"64:B7:08:85:64:54", 1},   /* node（2026-10-18 登録） */
 #endif
+
+// gateway 自身の加速度。node の JSON と同じシリアルに "node":0 の行として出す
+#ifndef GATEWAY_ACCEL_ENABLE
+#define GATEWAY_ACCEL_ENABLE    1
+#endif
+#ifndef GATEWAY_ACCEL_PERIOD_MS
+#define GATEWAY_ACCEL_PERIOD_MS 100     // 出力周期 [ms]（node の既定送信周期と同じ 10 Hz）
+#endif
+#define GATEWAY_SELF_NODE_ID    0       // gateway 自身の行の "node"（node は 1〜255 なので重ならない）
 
 // =============================================
 // 電源
@@ -160,6 +170,12 @@
 #endif
 #if defined(ROLE_GATEWAY) && !COMM_ENABLE
 #error "gateway は COMM_ENABLE=1 が必要です"
+#endif
+#if defined(ROLE_GATEWAY) && GATEWAY_ACCEL_ENABLE && !MODULE_ACCEL_ENABLE
+#error "GATEWAY_ACCEL_ENABLE には MODULE_ACCEL_ENABLE が必要です"
+#endif
+#if GATEWAY_ACCEL_PERIOD_MS < 10
+#error "GATEWAY_ACCEL_PERIOD_MS は 10 以上にしてください（シリアルが埋まるため）"
 #endif
 #if MODULE_DRINK_ENABLE && !(MODULE_ACCEL_ENABLE && MODULE_VIBRATION_ENABLE)
 #error "MODULE_DRINK_ENABLE には MODULE_ACCEL_ENABLE と MODULE_VIBRATION_ENABLE が必要です"

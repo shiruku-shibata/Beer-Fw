@@ -120,12 +120,37 @@ func _on_packet(node_id: int, data: Dictionary) -> void:
 
 | キー | 型 | 内容 |
 | --- | --- | --- |
-| `node` | int | node の ID（1〜255）。`GATEWAY_NODE_TABLE` にある node はその番号、ない node は書き込み時の `NODE_ID`。プレイヤー番号などに使う |
-| `mac` | string | node の MAC アドレス |
+| `node` | int | node の ID（1〜255）。`GATEWAY_NODE_TABLE` にある node はその番号、ない node は書き込み時の `NODE_ID`。プレイヤー番号などに使う。0 は gateway 自身の行（上記） |
+| `mac` | string | node の MAC アドレス（`node` = 0 の行は gateway の AP MAC） |
 | `seq` | int | 送信ごとに +1（0〜65535 で一周）。node が再起動すると 0 に戻る |
-| `t` | int | node の起動からの経過時間 [ms] |
-| `rx` | int | gateway がその node から受け取った累計パケット数 |
+| `t` | int | node の起動からの経過時間 [ms]（`node` = 0 の行は gateway の起動から）。時刻の基準は機器ごとに違うので、node どうしや gateway と比べない |
+| `rx` | int | gateway がその node から受け取った累計パケット数（`node` = 0 の行には無い。`lost` も同じ） |
 | `lost` | int | 届かなかったパケットの累計数（`seq` の飛びから推定） |
+
+### gateway 自身の加速度（`node` = 0）
+
+gateway も自分の内蔵 IMU の加速度を、node の行と同じシリアルに 100 ms ごと（10 回/秒）に出す。`node` が 0 の行が gateway 自身。node の番号は 1〜255 なので重ならない。
+
+```json
+{"node":0,"mac":"00:4B:12:A2:4C:5D","seq":7,"t":12345,"accel":{"x":0.0012,"y":-0.0034,"z":1.0011}}
+```
+
+- `mac` は gateway の AP MAC、`seq` は gateway の行ごとに +1、`t` は gateway の起動からの経過時間 [ms]。
+- `accel` は node と同じ形式。`rx` / `lost` とほかのモジュールのキーは出ない。
+- `GatewayReceiver` は gateway の行を `gateway_received(data)` で通知する。`packet_received` / `node_connected` は node（1〜255）だけなので、gateway がプレイヤーとして増えることはない。
+
+```gdscript
+func _ready() -> void:
+	var rx := GatewayReceiver.new()
+	rx.packet_received.connect(_on_packet)     # node
+	rx.gateway_received.connect(_on_gateway)   # gateway 自身
+	add_child(rx)
+
+func _on_gateway(data: Dictionary) -> void:
+	var a: Dictionary = data.get("accel", {})   # gateway の傾き・揺れ
+```
+
+止めるときは `-DGATEWAY_ACCEL_ENABLE=0`、周期は `GATEWAY_ACCEL_PERIOD_MS`（`src/config.h`）で変える。
 
 ### センサー・機能ごとの項目
 
@@ -147,10 +172,12 @@ func _on_packet(node_id: int, data: Dictionary) -> void:
 | --- | --- |
 | `node` | 100 ms ごと（10 回/秒） |
 | `mug` | 1 秒ごと |
+| （gateway 自身、`node` = 0） | 100 ms ごと（10 回/秒）。node の有無に関係なく出る |
 
 どちらの環境でも、飲み始め・飲み終わりや電池の警報など状態が変わったときは、間隔を待たずにすぐ送る。`mug` の `drink.tilt` や `accel` は 1 秒ごとにしか更新されないため、アニメーションを滑らかにしたいときは Godot 側で補間する。数秒（`mug` なら 3 秒程度）届かなければ、その node は切断・電源オフとみなしてよい。
 
 ## ドキュメント
 
 - [doc/system-architecture.md](doc/system-architecture.md) — システム構成・ビルド環境・通信プロトコル・各機能の仕様
+- [doc/gateway-accel.md](doc/gateway-accel.md) — gateway 自身の加速度（`node` = 0 の行）の仕様と設計判断
 - [doc/fw-structure-proposal.md](doc/fw-structure-proposal.md) — ファイル構成の設計意図、モジュールの追加手順

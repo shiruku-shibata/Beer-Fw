@@ -20,6 +20,7 @@ func _ready() -> void:
 	_build_ui()
 	_receiver = GatewayReceiver.new()
 	_receiver.packet_received.connect(_on_packet)
+	_receiver.gateway_received.connect(_on_gateway)
 	add_child(_receiver)
 
 
@@ -62,6 +63,11 @@ func _on_packet(node_id: int, data: Dictionary) -> void:
 
 	_nodes[node_id].apply(data)
 	_raw.text = _receiver.last_text
+
+
+## gateway 自身の加速度の行。node 0 のカード（「Gateway」）として表示する。
+func _on_gateway(data: Dictionary) -> void:
+	_on_packet(GatewayReceiver.GATEWAY_NODE_ID, data)
 
 
 ## 画面（タイトル・状態行・node カード欄・最後の JSON）をコードで組み立てる。
@@ -190,7 +196,10 @@ class NodeCard extends PanelContainer:
 	## 受信した JSON をカードに反映する（受信情報・加速度・電池・振動・飲酒の状態）。
 	func apply(data: Dictionary) -> void:
 		_last_msec = Time.get_ticks_msec()
-		_info.text = "seq %d   rx %d   lost %d" % [int(data.get("seq", 0)), int(data.get("rx", 0)), int(data.get("lost", 0))]
+		if data.has("rx"):
+			_info.text = "seq %d   rx %d   lost %d" % [int(data.get("seq", 0)), int(data.get("rx", 0)), int(data.get("lost", 0))]
+		else:
+			_info.text = "seq %d" % int(data.get("seq", 0))   # gateway 自身の行には rx / lost が無い
 
 		var a: Dictionary = data.get("accel", {})
 		for axis in _bars:
@@ -223,7 +232,8 @@ class NodeCard extends PanelContainer:
 	## 最後の受信から stale_sec 以上経っていればタイトルを赤くして「(no data)」を出す。
 	func refresh_stale(now_msec: int, stale_sec: float) -> void:
 		var stale := now_msec - _last_msec > stale_sec * 1000
-		_title.text = "Node %d%s" % [_id, "   (no data)" if stale else ""]
+		var label := "Gateway" if _id == GatewayReceiver.GATEWAY_NODE_ID else "Node %d" % _id
+		_title.text = "%s%s" % [label, "   (no data)" if stale else ""]
 		_title.modulate = Color(1, 0.4, 0.4) if stale else Color(0.5, 1, 0.5)
 
 
