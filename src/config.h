@@ -24,7 +24,8 @@
 // 汎用モジュール（センサー・出力・電池監視）は既定で有効。
 // ゲーム専用モジュールは既定で無効にし、ゲームごとの環境（platformio.ini）で有効にする。
 // gateway は受信データを JSON にするため、ゲーム専用モジュールもすべて有効にする
-// （gateway はモジュールの init / update を呼ばないので、センサーや振動は動かない）。
+// （gateway は scheduler を回さない。init / update を呼ぶのは GATEWAY_ACCEL_ENABLE 時の accel だけで、
+//   振動・電池監視などは動かない）。
 #if defined(ROLE_GATEWAY)
 #define MODULE_GAME_DEFAULT     1
 #else
@@ -172,6 +173,9 @@
 #endif
 #if defined(ROLE_GATEWAY) && GATEWAY_ACCEL_ENABLE && !MODULE_ACCEL_ENABLE
 #error "GATEWAY_ACCEL_ENABLE には MODULE_ACCEL_ENABLE が必要です"
+#endif
+#if GATEWAY_ACCEL_PERIOD_MS < 10
+#error "GATEWAY_ACCEL_PERIOD_MS は 10 以上にしてください（シリアルが埋まるため）"
 #endif
 #if MODULE_DRINK_ENABLE && !(MODULE_ACCEL_ENABLE && MODULE_VIBRATION_ENABLE)
 #error "MODULE_DRINK_ENABLE には MODULE_ACCEL_ENABLE と MODULE_VIBRATION_ENABLE が必要です"

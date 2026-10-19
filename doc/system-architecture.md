@@ -134,9 +134,11 @@ gateway は最大 8 台の node を MAC で識別し、受信パケットごと�
 
 **gateway 自身の加速度**（`GATEWAY_ACCEL_ENABLE`、既定 1）
 
-- 初期化時に加速度モジュール（`module_find(MODULE_ID_ACCEL)`）の `init()` だけを呼ぶ。他のモジュール（振動・電池監視など）は gateway では動かさない。IMU が使えなければ警告を出して無効にする。
+- 初期化時に加速度モジュール（`module_find(MODULE_ID_ACCEL)`）の `init()` だけを呼ぶ（`scheduler` は回さない）。他のモジュール（振動・電池監視など）は gateway では動かさない。IMU が使えなければ警告を出して無効にする。
 - loop で `GATEWAY_ACCEL_PERIOD_MS`（既定 100 ms）ごとに `update()` → `encode()` → `to_json()` を呼び、`"node":0` の JSON 1 行をシリアルへ出す。node の行と同じモジュールの関数を使うので、`accel` の形式は node と一致する。
 - node の受信処理を先に済ませてから出す。node が 1 台もいなくても出る。
+- `node_id` が 0 のパケットは gateway 自身の行と区別できないので、対応表に無ければ捨てる（警告は 5 秒に 1 回）。
+- `GATEWAY_ACCEL_PERIOD_MS` が 10 未満ならコンパイルエラーにする。
 
 **受信処理**
 
@@ -280,7 +282,7 @@ gateway 自身の加速度の行（`GATEWAY_ACCEL_PERIOD_MS` ごと）:
 | --- | --- | --- | --- |
 | 送信周期 100 ms（10 Hz） | `config.h` `COMM_TX_PERIOD_MS`、`ACCEL_PERIOD_MS` | ゲーム入力としては遅延が大きい | 必要なレートが決まったら設定値を下げる |
 | gateway MAC がハードコード | `config.h` `COMM_GATEWAY_MAC` | gateway を交換すると全 node の再ビルドが必要 | ブロードキャスト送信、またはペアリング手順を検討する |
-| 115200 bps の帯域 | gateway シリアル | node の台数とレートを上げると詰まる（JSON 1 行 約 130 バイト） | ボーレートを上げる。または JSON を短くする |
+| 115200 bps の帯域 | gateway シリアル | node の台数とレートを上げると詰まる（JSON 1 行: `node` 環境の node 約 180 バイト、gateway 自身の行 約 105 バイト × 10 Hz。115200 bps ≒ 11.5 kB/s に対し、`node` 8 台 × 10 Hz で約 125 %） | ボーレートを上げる。または JSON を短くする |
 | LCD を毎回全面再描画 | `core/display` | ちらつき | 必要なら差分描画にする |
 | 実機での動作確認が未実施 | — | 新構成は 2026-10-04 時点でビルド確認のみ | node・gateway を書き込んで確認する |
 

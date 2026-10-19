@@ -18,7 +18,7 @@ Godot 4 には標準のシリアル API がないため、PC 上のブリッジ�
 | ファイル | 役割 |
 | --- | --- |
 | `tools/serial_udp_bridge.py` | シリアル → UDP の中継。`{` で始まる行だけを送り、`#` 始まりのログはコンソールに出す。`--demo` で実機なしの疑似データを送る |
-| `godot/gateway_receiver.gd` | `GatewayReceiver` ノード。UDP を受けて JSON を読み、`packet_received(node_id, data)` を出す。ゲームでもそのまま使える |
+| `godot/gateway_receiver.gd` | `GatewayReceiver` ノード。UDP を受けて JSON を読み、node の行は `packet_received(node_id, data)`、gateway 自身の行（`node` = 0）は `gateway_received(data)` で出す。ゲームでもそのまま使える |
 | `godot/main.gd` / `main.tscn` | 接続確認画面。node ごとに seq・欠落数・加速度・傾き・電池・振動・飲酒検出を表示する |
 
 ## 必要なもの
@@ -56,6 +56,7 @@ Godot で `godot/project.godot` を開いて実行（F5）。Gateway と Node 1�
 | --- | --- | --- |
 | 上部のステータス | 緑。`pkt/s` が node 台数 × 送信レート（`node` は 10/s、`node_lowpower`・`mug` は 1/s ＋状態変化時）＋ gateway 自身の 10/s | 黄色「Listening…」: ブリッジ未起動、またはブリッジにデータが来ていない。赤: UDP ポートを他のアプリが使用中 |
 | Node カードのタイトル | 緑 | 赤「(no data)」: その node から 1 秒以上届いていない。電源、`COMM_GATEWAY_MAC`、距離を確認 |
+| Gateway カード | 緑。gateway を傾けると動く | Gateway だけ出て Node が出ない: シリアルとブリッジは正常で、node 側（電源・`COMM_GATEWAY_MAC`・距離）の問題。Gateway が「(no data)」: gateway の IMU 初期化失敗（ログに `Gateway accel unavailable`）か `GATEWAY_ACCEL_ENABLE=0` |
 | `lost` | 0 のまま、たまに増える程度 | 増え続ける: 電波が弱い、または送信レートに対してシリアルが詰まっている |
 | `errors` | 0 | 増える: JSON として読めない行が来ている。ボーレート（115200）を確認 |
 

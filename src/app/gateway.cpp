@@ -189,6 +189,22 @@ static void handlePacket(const uint8_t *mac, const uint8_t *data, size_t len)
         return;
     }
 
+    // node_id 0 は gateway 自身の行と区別できないので、対応表に無ければ捨てる（この FW の node は 1〜255）
+    if (hdr->node_id == GATEWAY_SELF_NODE_ID) {
+        char macStr[18];
+        comm_mac_to_str(mac, macStr);
+        if (lookupMappedId(macStr) == 0) {
+            static uint32_t s_lastWarn = 0;
+            uint32_t now = millis();
+            if (s_lastWarn == 0 || now - s_lastWarn >= 5000) {
+                s_lastWarn = now;
+                LOG_W("Node %s sent node_id %d (reserved for gateway), dropped. Add it to GATEWAY_NODE_TABLE",
+                      macStr, GATEWAY_SELF_NODE_ID);
+            }
+            return;
+        }
+    }
+
     int idx = findOrAddNode(mac, hdr->node_id);
     if (idx < 0) {
         LOG_W("Node table full, packet dropped");
