@@ -103,7 +103,7 @@
 
 // node の送信先（gateway の AP MAC）
 #ifndef COMM_GATEWAY_MAC
-#define COMM_GATEWAY_MAC        {0x00, 0x4B, 0x12, 0xA0, 0x9A, 0x5D}
+#define COMM_GATEWAY_MAC        {0x00, 0x4B, 0x12, 0xA2, 0x4C, 0x5D}
 #endif
 
 // node の識別番号（1〜255）。個体ごとに build_flags で上書きする
