@@ -146,8 +146,8 @@ gateway は最大 8 台の node を MAC で識別し、受信パケットごと�
 - loop はバッファが空になるまで取り出し、ヘッダを検証して node 表に記録し、JSON を出力する。
 - JSON の `node` は、MAC が `GATEWAY_NODE_TABLE`（`config.h`）にあればその番号、なければパケットの `node_id`。表は node を初めて受信したときに 1 回だけ引く。表にない node はログに追加用の 1 行を出す。
 - `seq` の飛びから欠落数（`lost`）を数える。1000 以上の飛びは node の再起動とみなして数えない。
-- ボタン A で表示する node を切り替える。LCD は表示中の node が更新されたときだけ、最短 100 ms 間隔で描き直す。
-- ボタン B で AP MAC 表示（AP MAC・受信中の node 数・チャンネル）と切り替える。node 側もボタン B で自機 MAC・`NODE_ID`・送信先 gateway MAC を表示する。
+- LCD の通常画面は、gateway 自身の加速度、node ごとの飲酒判定（drink の `to_text()` を番号順に最大 5 行。3 秒届かなければ `no data`）、AP MAC。最短 100 ms 間隔で描き直す。受信数・欠落数は画面に出さない（JSON には出す）。
+- ボタン B で AP MAC の大きな表示（AP MAC・チャンネル）と切り替える。node 側もボタン B で自機 MAC・`NODE_ID`・送信先 gateway MAC を表示する。
 
 ## 振動モジュール（Vibration Hat）
 

@@ -51,9 +51,19 @@ B ボタン（右側面）を押すと、MAC 表示と通常表示が切り替�
 | 機器 | B ボタンで出る内容 |
 | --- | --- |
 | node 系（`node` / `node_lowpower` / `mug`） | 自機の MAC（`GATEWAY_NODE_TABLE` に書く値）、`NODE_ID`、送信先の gateway MAC |
-| gateway | AP MAC（node の `COMM_GATEWAY_MAC` に書く値）、受信中の node 数、チャンネル |
+| gateway | AP MAC（node の `COMM_GATEWAY_MAC` に書く値）を大きく、チャンネル |
 
-node は画面が自動で消えると通常表示に戻る。gateway は A ボタンでも通常表示に戻る。
+node は画面が自動で消えると通常表示に戻る。
+
+gateway の通常画面には、上から gateway 自身の加速度、node ごとの飲酒判定（番号順、最大 5 行）、AP MAC が出る。
+
+| 飲酒判定の行 | 意味 |
+| --- | --- |
+| `N1 PRESS A` | node 1 は検出前（node の A ボタンで開始） |
+| `N1 ----  3deg #12` | 検出中・飲んでいない（傾き 3°、ゴクッ累計 12 回） |
+| `N1 GOKU  52deg #12`（黄） | 飲んでいる |
+| `N1 no data`（赤） | 3 秒以上届いていない |
+| `N1 no drink` | node のファームに飲酒検出が入っていない |
 
 ### node 番号を MAC で固定する
 
