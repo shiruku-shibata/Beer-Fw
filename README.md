@@ -37,7 +37,8 @@ pio run -e gateway -t upload                                   # 受信機
 pio run -e node -t upload                                      # 汎用 node（NODE_ID=1）
 PLATFORMIO_BUILD_FLAGS="-DNODE_ID=2" pio run -e node -t upload # 2 台目以降
 pio run -e mug -t upload                                       # ビールジョッキ
-pio device monitor                                             # シリアル出力（115200 bps）
+pio device monitor -e gateway                                  # gateway のシリアル出力（1500000 bps）
+pio device monitor -e mug                                      # node のシリアル出力（115200 bps）
 ```
 
 node 側の送信先は `src/config.h` の `COMM_GATEWAY_MAC`。受信機の起動画面に出る AP MAC を設定する。
@@ -92,7 +93,7 @@ gateway は node から 1 パケット受け取るごとに、USB シリアル�
 ```mermaid
 flowchart LR
     N["node / mug"] -- ESP-NOW --> GW["gateway"]
-    GW -- "USB シリアル 115200 bps<br/>1 行 = 1 JSON" --> B["serial_udp_bridge.py"]
+    GW -- "USB シリアル 1500000 bps<br/>1 行 = 1 JSON" --> B["serial_udp_bridge.py"]
     B -- "UDP 127.0.0.1:9000<br/>1 datagram = 1 JSON" --> G["Godot<br/>GatewayReceiver"]
 ```
 
@@ -137,16 +138,16 @@ func _on_packet(node_id: int, data: Dictionary) -> void:
 | `rx` | int | gateway がその node から受け取った累計パケット数（`node` = 0 の行には無い。`lost` も同じ） |
 | `lost` | int | 届かなかったパケットの累計数（`seq` の飛びから推定） |
 
-### gateway 自身の加速度（`node` = 0）
+### gateway 自身の加速度・角速度（`node` = 0）
 
-gateway も自分の内蔵 IMU の加速度を、node の行と同じシリアルに 100 ms ごと（10 回/秒）に出す。`node` が 0 の行が gateway 自身。node の番号は 1〜255 なので重ならない。
+gateway も自分の内蔵 IMU の加速度・角速度を、node の行と同じシリアルに 10 ms ごと（100 回/秒）に出す。`node` が 0 の行が gateway 自身。node の番号は 1〜255 なので重ならない。
 
 ```json
-{"node":0,"mac":"00:4B:12:A2:4C:5D","seq":7,"t":12345,"accel":{"x":0.0012,"y":-0.0034,"z":1.0011}}
+{"node":0,"mac":"00:4B:12:A2:4C:5D","seq":7,"t":12345,"accel":{"x":0.0012,"y":-0.0034,"z":1.0011},"gyro":{"x":-0.37,"y":0.06,"z":-0.12}}
 ```
 
 - `mac` は gateway の AP MAC、`seq` は gateway の行ごとに +1、`t` は gateway の起動からの経過時間 [ms]。
-- `accel` は node と同じ形式。`rx` / `lost` とほかのモジュールのキーは出ない。
+- `accel` は node と同じ形式。`gyro` は gateway の行だけにある（node は送らない）。`rx` / `lost` とほかのモジュールのキーは出ない。
 - `GatewayReceiver` は gateway の行を `gateway_received(data)` で通知する。`packet_received` / `node_connected` は node（1〜255）だけなので、gateway がプレイヤーとして増えることはない。
 
 ```gdscript
@@ -158,6 +159,7 @@ func _ready() -> void:
 
 func _on_gateway(data: Dictionary) -> void:
 	var a: Dictionary = data.get("accel", {})   # gateway の傾き・揺れ
+	var gx := float(data.get("gyro", {}).get("x", 0.0))   # x 軸まわりの角速度 [deg/s]
 ```
 
 止めるときは `-DGATEWAY_ACCEL_ENABLE=0`、周期は `GATEWAY_ACCEL_PERIOD_MS`（`src/config.h`）で変える。
@@ -167,6 +169,7 @@ func _on_gateway(data: Dictionary) -> void:
 | キー | 型 | 内容 |
 | --- | --- | --- |
 | `accel.x` / `accel.y` / `accel.z` | float | 内蔵 IMU の加速度 [G]。静止時は合計で約 1.0（重力）。軸は M5StickC Plus2 本体の向き |
+| `gyro.x` / `gyro.y` / `gyro.z` | float | gateway の行（`node` = 0）だけ。内蔵 IMU の角速度 [deg/s]（±2000）。補正なしの生の値で、Sensor Test App の gX/gY/gZ と同じ単位・向き |
 | `vibration` | int | 今の振動の強さ（0〜100 [%]）。0 なら止まっている |
 | `drink.armed` | 0 / 1 | 1 = 検出中（A ボタンで開始済み）。0 のときは他の `drink` の値を使わない |
 | `drink.active` | 0 / 1 | 1 = 飲んでいる。40° 以上の傾きが 0.3 秒続くと 1、30° 未満に戻ると 0 |
@@ -182,12 +185,12 @@ func _on_gateway(data: Dictionary) -> void:
 | --- | --- |
 | `node` | 100 ms ごと（10 回/秒） |
 | `mug` | 1 秒ごと |
-| （gateway 自身、`node` = 0） | 100 ms ごと（10 回/秒）。node の有無に関係なく出る |
+| （gateway 自身、`node` = 0） | 10 ms ごと（100 回/秒）。node の有無に関係なく出る |
 
 どちらの環境でも、飲み始め・飲み終わりや電池の警報など状態が変わったときは、間隔を待たずにすぐ送る。`mug` の `drink.tilt` や `accel` は 1 秒ごとにしか更新されないため、アニメーションを滑らかにしたいときは Godot 側で補間する。数秒（`mug` なら 3 秒程度）届かなければ、その node は切断・電源オフとみなしてよい。
 
 ## ドキュメント
 
 - [doc/system-architecture.md](doc/system-architecture.md) — システム構成・ビルド環境・通信プロトコル・各機能の仕様
-- [doc/gateway-accel.md](doc/gateway-accel.md) — gateway 自身の加速度（`node` = 0 の行）の仕様と設計判断
+- [doc/gateway-accel.md](doc/gateway-accel.md) — gateway 自身の加速度・角速度（`node` = 0 の行）の仕様と設計判断
 - [doc/fw-structure-proposal.md](doc/fw-structure-proposal.md) — ファイル構成の設計意図、モジュールの追加手順

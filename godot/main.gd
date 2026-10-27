@@ -209,6 +209,9 @@ class NodeCard extends PanelContainer:
 		_tilt.set_accel(float(a.get("x", 0.0)), float(a.get("y", 0.0)))
 
 		var lines := PackedStringArray()
+		if data.has("gyro"):   # gateway 自身の行（node 0）だけ。[deg/s]
+			var gy: Dictionary = data["gyro"]
+			lines.append("gyro x %+.0f  y %+.0f  z %+.0f dps" % [float(gy.get("x", 0.0)), float(gy.get("y", 0.0)), float(gy.get("z", 0.0))])
 		if data.has("battery"):
 			var b: Dictionary = data["battery"]
 			var flag := ""

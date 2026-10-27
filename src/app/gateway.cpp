@@ -3,8 +3,8 @@
  *
  * 【シリアル出力】1 パケット = 1 行の JSON。ログ行は "#" で始まる。
  * {"node":1,"mac":"AA:BB:CC:DD:EE:FF","seq":42,"t":12345,"rx":43,"lost":0,"accel":{"x":0.1234,"y":-0.4567,"z":0.9789}}
- * gateway 自身の加速度は GATEWAY_ACCEL_PERIOD_MS ごとに "node":0 の行で出す（GATEWAY_ACCEL_ENABLE）。
- * {"node":0,"mac":"<AP MAC>","seq":7,"t":12345,"accel":{"x":0.0012,"y":-0.0034,"z":1.0011}}
+ * gateway 自身の加速度 [G]・角速度 [deg/s] は GATEWAY_ACCEL_PERIOD_MS ごとに "node":0 の行で出す（GATEWAY_ACCEL_ENABLE）。
+ * {"node":0,"mac":"<AP MAC>","seq":7,"t":12345,"accel":{"x":0.0012,"y":-0.0034,"z":1.0011},"gyro":{"x":-1.89,"y":0.43,"z":0.12}}
  *
  * 【画面】gateway の加速度、node ごとの飲酒判定（drink の to_text）、AP MAC
  * 【操作】ボタン B で AP MAC の大きな表示と切り替える
@@ -23,6 +23,7 @@
 #include "core/protocol.h"
 #include "modules/module.h"
 #if GATEWAY_ACCEL_ENABLE
+#include <M5Unified.h>
 #include "modules/accel.h"
 #endif
 
@@ -231,12 +232,27 @@ static void handlePacket(const uint8_t *mac, const uint8_t *data, size_t len)
 }
 
 // =============================================
-// gateway 自身の加速度（"node":0 の行）
+// gateway 自身の加速度・角速度（"node":0 の行）
 // =============================================
 #if GATEWAY_ACCEL_ENABLE
-static const Module *s_selfAccel  = nullptr;   // 加速度モジュール。使えなければ nullptr
-static uint16_t      s_selfSeq    = 0;
-static uint32_t      s_selfLastTx = 0;
+// IMU は専用タスクで GATEWAY_ACCEL_PERIOD_MS ごとに読み、キュー経由で loop がシリアルへ出す。
+// loop で読むと LCD の描き直し（約 25 ms）の間のサンプルが抜け、ジャイロのピークを取りこぼすため。
+typedef struct {
+    uint32_t t;          // 読んだ時刻 millis()
+    uint16_t seq;        // キューがあふれて捨てた分は seq が飛ぶ
+    uint8_t  len;
+    uint8_t  accel[16];  // 加速度モジュールの encode() の結果（12 バイト）
+    float    gx, gy, gz; // 角速度 [deg/s]
+} SelfSample;
+
+static constexpr UBaseType_t SELF_QUEUE_LEN     = 16;   // 160 ms 分。loop が止まるのは LCD 描画の約 25 ms
+static constexpr UBaseType_t SELF_TASK_PRIORITY = 2;    // loop（1）より上にし、描画中も周期どおり読む
+
+static const Module  *s_selfAccel   = nullptr;   // 加速度モジュール。使えなければ nullptr
+static QueueHandle_t  s_selfQueue   = nullptr;
+static uint16_t       s_selfSeq     = 0;          // タスクだけが書く
+static volatile uint32_t s_selfDropped = 0;       // キューがあふれて捨てたサンプル数（タスクが書く）
+static uint32_t       s_selfLastDropped = 0;
 
 /**
  * @brief 加速度モジュールを gateway 用に初期化する。他のモジュール（振動など）は動かさない。
@@ -253,32 +269,72 @@ static void selfAccelInit(void)
 }
 
 /**
- * @brief 出力周期が来たら加速度を読み、node の行と同じ形式の JSON 1 行（"node":0）をシリアルへ出す。
- *
- * @param now 現在時刻 [ms]
+ * @brief [タスク] GATEWAY_ACCEL_PERIOD_MS ごとに加速度・角速度を読み、キューに積む。
+ *        IMU（I2C）に触るのはこのタスクだけ。
  */
-static void selfAccelPoll(uint32_t now)
+static void selfImuTask(void *)
 {
-    if (s_selfAccel == nullptr || now - s_selfLastTx < GATEWAY_ACCEL_PERIOD_MS) return;
-    s_selfLastTx = now;
+    TickType_t wake = xTaskGetTickCount();
+    for (;;) {
+        vTaskDelayUntil(&wake, pdMS_TO_TICKS(GATEWAY_ACCEL_PERIOD_MS));
 
-    s_selfAccel->update();
-    float x, y, z;
-    if (!accel_get(&x, &y, &z)) return;   // まだ一度も読めていない
+        s_selfAccel->update();
+        float x, y, z;
+        if (!accel_get(&x, &y, &z)) continue;   // まだ一度も読めていない
 
-    uint8_t data[PROTOCOL_MAX_PAYLOAD];
-    size_t  len = s_selfAccel->encode(data, sizeof(data));
-    if (len == 0) return;
+        SelfSample s;
+        s.t   = millis();
+        s.len = (uint8_t)s_selfAccel->encode(s.accel, sizeof(s.accel));
+        if (s.len == 0) continue;
+        M5.Imu.getGyroData(&s.gx, &s.gy, &s.gz);   // update() 直後なので同じサンプル（IMU を読み直さない）
+        s.seq = s_selfSeq++;
+        if (xQueueSend(s_selfQueue, &s, 0) != pdTRUE) s_selfDropped++;
+    }
+}
 
-    char line[192];
-    int pos = snprintf(line, sizeof(line), "{\"node\":%d,\"mac\":\"%s\",\"seq\":%u,\"t\":%lu,",
-                       GATEWAY_SELF_NODE_ID, comm_self_mac(), s_selfSeq++, (unsigned long)now);
-    int n = s_selfAccel->to_json(data, len, line + pos, sizeof(line) - pos - 1);
-    if (n <= 0 || pos + n >= (int)sizeof(line) - 1) return;
-    pos += n;
-    line[pos++] = '}';
-    line[pos]   = '\0';
-    Serial.println(line);
+/**
+ * @brief IMU タスクを起動する。起動画面の待ちが終わってから呼ぶ（待っている間にキューがあふれるため）。
+ */
+static void selfAccelStart(void)
+{
+    if (s_selfAccel == nullptr) return;
+    s_selfQueue = xQueueCreate(SELF_QUEUE_LEN, sizeof(SelfSample));
+    if (s_selfQueue == nullptr ||
+        xTaskCreatePinnedToCore(selfImuTask, "gw_imu", 4096, nullptr, SELF_TASK_PRIORITY, nullptr, ARDUINO_RUNNING_CORE) != pdPASS) {
+        LOG_W("Gateway accel task failed, node %d disabled", GATEWAY_SELF_NODE_ID);
+        s_selfAccel = nullptr;
+    }
+}
+
+/**
+ * @brief キューにたまったサンプルを、node の行と同じ形式の JSON 1 行（"node":0）ずつシリアルへ出す。
+ *        "gyro" は M5Unified の生の角速度 [deg/s]（±2000 dps。ゲームのジャイロ閾値と同じ単位）。
+ */
+static void selfAccelPoll(void)
+{
+    if (s_selfAccel == nullptr) return;
+
+    SelfSample s;
+    while (xQueueReceive(s_selfQueue, &s, 0) == pdTRUE) {
+        char line[192];
+        int pos = snprintf(line, sizeof(line), "{\"node\":%d,\"mac\":\"%s\",\"seq\":%u,\"t\":%lu,",
+                           GATEWAY_SELF_NODE_ID, comm_self_mac(), s.seq, (unsigned long)s.t);
+        int n = s_selfAccel->to_json(s.accel, s.len, line + pos, sizeof(line) - pos - 1);
+        if (n <= 0 || pos + n >= (int)sizeof(line) - 1) continue;
+        pos += n;
+        n = snprintf(line + pos, sizeof(line) - pos - 1, ",\"gyro\":{\"x\":%.2f,\"y\":%.2f,\"z\":%.2f}", s.gx, s.gy, s.gz);
+        if (n <= 0 || pos + n >= (int)sizeof(line) - 1) continue;
+        pos += n;
+        line[pos++] = '}';
+        line[pos]   = '\0';
+        Serial.println(line);
+    }
+
+    uint32_t dropped = s_selfDropped;
+    if (dropped != s_selfLastDropped) {
+        LOG_W("Gateway accel queue overflow: %lu samples dropped in total", (unsigned long)dropped);
+        s_selfLastDropped = dropped;
+    }
 }
 #endif  // GATEWAY_ACCEL_ENABLE
 
@@ -323,7 +379,7 @@ static void drawMain(uint32_t now)
 
 #if GATEWAY_ACCEL_ENABLE
     float x, y, z;
-    if (s_selfAccel != nullptr && accel_get(&x, &y, &z)) {
+    if (s_selfAccel != nullptr && accel_get(&x, &y, &z)) {   // IMU タスクが書く最新値（表示だけなので排他しない）
         snprintf(buf, sizeof(buf), "X%+.2f Y%+.2f Z%+.2f\n", x, y, z);   // 20 文字（1 行）
         display_print(buf, 2, TFT_GREEN);
     } else {
@@ -398,6 +454,9 @@ void app_init(void)
     display_print("\n\nSet to\nCOMM_GATEWAY_MAC", 2, TFT_CYAN);
     delay(3000);
 
+#if GATEWAY_ACCEL_ENABLE
+    selfAccelStart();
+#endif
     LOG_I("Gateway ready.");
 }
 
@@ -427,10 +486,10 @@ void app_loop(void)
         s_lastDropped = dropped;
     }
 
-    uint32_t now = millis();
 #if GATEWAY_ACCEL_ENABLE
-    selfAccelPoll(now);
+    selfAccelPoll();
 #endif
+    uint32_t now = millis();
 
     // 通常画面は加速度・途絶表示が変わるので毎回（最短 DISPLAY_PERIOD_MS 間隔）描く。AP MAC 表示は 1 回だけ
     if (s_showInfo) {

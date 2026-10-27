@@ -58,7 +58,7 @@ Godot で `godot/project.godot` を開いて実行（F5）。Gateway と Node 1�
 | Node カードのタイトル | 緑 | 赤「(no data)」: その node から 1 秒以上届いていない。電源、`COMM_GATEWAY_MAC`、距離を確認 |
 | Gateway カード | 緑。gateway を傾けると動く | Gateway だけ出て Node が出ない: シリアルとブリッジは正常で、node 側（電源・`COMM_GATEWAY_MAC`・距離）の問題。Gateway が「(no data)」: gateway の IMU 初期化失敗（ログに `Gateway accel unavailable`）か `GATEWAY_ACCEL_ENABLE=0` |
 | `lost` | 0 のまま、たまに増える程度 | 増え続ける: 電波が弱い、または送信レートに対してシリアルが詰まっている |
-| `errors` | 0 | 増える: JSON として読めない行が来ている。ボーレート（115200）を確認 |
+| `errors` | 0 | 増える: JSON として読めない行が来ている。ボーレート（gateway は 1500000。ブリッジの既定値）を確認 |
 
 `mug` 環境の node は 1 秒ごとに送るため、表示の更新も 1 秒ごとになる。
 
