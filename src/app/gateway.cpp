@@ -3,10 +3,11 @@
  *
  * 【シリアル出力】1 パケット = 1 行の JSON。ログ行は "#" で始まる。
  * {"node":1,"mac":"AA:BB:CC:DD:EE:FF","seq":42,"t":12345,"rx":43,"lost":0,"accel":{"x":0.1234,"y":-0.4567,"z":0.9789}}
- * gateway 自身の加速度は GATEWAY_ACCEL_PERIOD_MS ごとに "node":0 の行で出す（GATEWAY_ACCEL_ENABLE）。
- * {"node":0,"mac":"<AP MAC>","seq":7,"t":12345,"accel":{"x":0.0012,"y":-0.0034,"z":1.0011}}
+ * gateway 自身の加速度 [G]・角速度 [deg/s] は GATEWAY_ACCEL_PERIOD_MS ごとに "node":0 の行で出す（GATEWAY_ACCEL_ENABLE）。
+ * {"node":0,"mac":"<AP MAC>","seq":7,"t":12345,"accel":{"x":0.0012,"y":-0.0034,"z":1.0011},"gyro":{"x":-1.89,"y":0.43,"z":0.12}}
  *
- * 【操作】ボタン A で表示する node を切り替える。ボタン B で AP MAC 表示と切り替える
+ * 【画面】gateway の加速度、node ごとの飲酒判定（drink の to_text）、AP MAC
+ * 【操作】ボタン B で AP MAC の大きな表示と切り替える
  */
 
 #include "app/app.h"
@@ -22,6 +23,7 @@
 #include "core/protocol.h"
 #include "modules/module.h"
 #if GATEWAY_ACCEL_ENABLE
+#include <M5Unified.h>
 #include "modules/accel.h"
 #endif
 
@@ -43,15 +45,18 @@ typedef struct {
     uint16_t lastSeq;
     uint32_t rxCount;
     uint32_t lostCount;
+    uint32_t lastRxMs;   // 最後に受信した millis()（表示の途絶判定用）
     uint8_t  data[PROTOCOL_MAX_PAYLOAD];   // 最新パケット（表示用）
     size_t   len;
 } NodeEntry;
 
 static NodeEntry s_nodes[GATEWAY_MAX_NODES] = {};
 static uint8_t   s_nodeCount  = 0;
-static uint8_t   s_dispNode   = 0;
-static bool      s_dispDirty  = false;
 static bool      s_showInfo   = false;   // ボタン B の AP MAC 表示中
+static bool      s_infoDrawn  = false;
+
+static constexpr uint32_t NODE_STALE_MS   = 3000;   // この時間届かない node は「no data」と表示する
+static constexpr uint8_t  DISP_NODE_LINES = 5;      // 画面に並べる node の行数
 static uint32_t  s_lastDropped = 0;
 
 /**
@@ -219,21 +224,35 @@ static void handlePacket(const uint8_t *mac, const uint8_t *data, size_t len)
     node.nodeId  = (node.mappedId != 0) ? node.mappedId : hdr->node_id;
     node.lastSeq = hdr->seq;
     node.rxCount++;
+    node.lastRxMs = millis();
     memcpy(node.data, data, len);
     node.len = len;
 
     sendJson(node, hdr, data, len);
-
-    if (idx == s_dispNode && !s_showInfo) s_dispDirty = true;
 }
 
 // =============================================
-// gateway 自身の加速度（"node":0 の行）
+// gateway 自身の加速度・角速度（"node":0 の行）
 // =============================================
 #if GATEWAY_ACCEL_ENABLE
-static const Module *s_selfAccel  = nullptr;   // 加速度モジュール。使えなければ nullptr
-static uint16_t      s_selfSeq    = 0;
-static uint32_t      s_selfLastTx = 0;
+// IMU は専用タスクで GATEWAY_ACCEL_PERIOD_MS ごとに読み、キュー経由で loop がシリアルへ出す。
+// loop で読むと LCD の描き直し（約 25 ms）の間のサンプルが抜け、ジャイロのピークを取りこぼすため。
+typedef struct {
+    uint32_t t;          // 読んだ時刻 millis()
+    uint16_t seq;        // キューがあふれて捨てた分は seq が飛ぶ
+    uint8_t  len;
+    uint8_t  accel[16];  // 加速度モジュールの encode() の結果（12 バイト）
+    float    gx, gy, gz; // 角速度 [deg/s]
+} SelfSample;
+
+static constexpr UBaseType_t SELF_QUEUE_LEN     = 16;   // 160 ms 分。loop が止まるのは LCD 描画の約 25 ms
+static constexpr UBaseType_t SELF_TASK_PRIORITY = 2;    // loop（1）より上にし、描画中も周期どおり読む
+
+static const Module  *s_selfAccel   = nullptr;   // 加速度モジュール。使えなければ nullptr
+static QueueHandle_t  s_selfQueue   = nullptr;
+static uint16_t       s_selfSeq     = 0;          // タスクだけが書く
+static volatile uint32_t s_selfDropped = 0;       // キューがあふれて捨てたサンプル数（タスクが書く）
+static uint32_t       s_selfLastDropped = 0;
 
 /**
  * @brief 加速度モジュールを gateway 用に初期化する。他のモジュール（振動など）は動かさない。
@@ -250,78 +269,156 @@ static void selfAccelInit(void)
 }
 
 /**
- * @brief 出力周期が来たら加速度を読み、node の行と同じ形式の JSON 1 行（"node":0）をシリアルへ出す。
- *
- * @param now 現在時刻 [ms]
+ * @brief [タスク] GATEWAY_ACCEL_PERIOD_MS ごとに加速度・角速度を読み、キューに積む。
+ *        IMU（I2C）に触るのはこのタスクだけ。
  */
-static void selfAccelPoll(uint32_t now)
+static void selfImuTask(void *)
 {
-    if (s_selfAccel == nullptr || now - s_selfLastTx < GATEWAY_ACCEL_PERIOD_MS) return;
-    s_selfLastTx = now;
+    TickType_t wake = xTaskGetTickCount();
+    for (;;) {
+        vTaskDelayUntil(&wake, pdMS_TO_TICKS(GATEWAY_ACCEL_PERIOD_MS));
 
-    s_selfAccel->update();
-    float x, y, z;
-    if (!accel_get(&x, &y, &z)) return;   // まだ一度も読めていない
+        s_selfAccel->update();
+        float x, y, z;
+        if (!accel_get(&x, &y, &z)) continue;   // まだ一度も読めていない
 
-    uint8_t data[PROTOCOL_MAX_PAYLOAD];
-    size_t  len = s_selfAccel->encode(data, sizeof(data));
-    if (len == 0) return;
+        SelfSample s;
+        s.t   = millis();
+        s.len = (uint8_t)s_selfAccel->encode(s.accel, sizeof(s.accel));
+        if (s.len == 0) continue;
+        M5.Imu.getGyroData(&s.gx, &s.gy, &s.gz);   // update() 直後なので同じサンプル（IMU を読み直さない）
+        s.seq = s_selfSeq++;
+        if (xQueueSend(s_selfQueue, &s, 0) != pdTRUE) s_selfDropped++;
+    }
+}
 
-    char line[192];
-    int pos = snprintf(line, sizeof(line), "{\"node\":%d,\"mac\":\"%s\",\"seq\":%u,\"t\":%lu,",
-                       GATEWAY_SELF_NODE_ID, comm_self_mac(), s_selfSeq++, (unsigned long)now);
-    int n = s_selfAccel->to_json(data, len, line + pos, sizeof(line) - pos - 1);
-    if (n <= 0 || pos + n >= (int)sizeof(line) - 1) return;
-    pos += n;
-    line[pos++] = '}';
-    line[pos]   = '\0';
-    Serial.println(line);
+/**
+ * @brief IMU タスクを起動する。起動画面の待ちが終わってから呼ぶ（待っている間にキューがあふれるため）。
+ */
+static void selfAccelStart(void)
+{
+    if (s_selfAccel == nullptr) return;
+    s_selfQueue = xQueueCreate(SELF_QUEUE_LEN, sizeof(SelfSample));
+    if (s_selfQueue == nullptr ||
+        xTaskCreatePinnedToCore(selfImuTask, "gw_imu", 4096, nullptr, SELF_TASK_PRIORITY, nullptr, ARDUINO_RUNNING_CORE) != pdPASS) {
+        LOG_W("Gateway accel task failed, node %d disabled", GATEWAY_SELF_NODE_ID);
+        s_selfAccel = nullptr;
+    }
+}
+
+/**
+ * @brief キューにたまったサンプルを、node の行と同じ形式の JSON 1 行（"node":0）ずつシリアルへ出す。
+ *        "gyro" は M5Unified の生の角速度 [deg/s]（±2000 dps。ゲームのジャイロ閾値と同じ単位）。
+ */
+static void selfAccelPoll(void)
+{
+    if (s_selfAccel == nullptr) return;
+
+    SelfSample s;
+    while (xQueueReceive(s_selfQueue, &s, 0) == pdTRUE) {
+        char line[192];
+        int pos = snprintf(line, sizeof(line), "{\"node\":%d,\"mac\":\"%s\",\"seq\":%u,\"t\":%lu,",
+                           GATEWAY_SELF_NODE_ID, comm_self_mac(), s.seq, (unsigned long)s.t);
+        int n = s_selfAccel->to_json(s.accel, s.len, line + pos, sizeof(line) - pos - 1);
+        if (n <= 0 || pos + n >= (int)sizeof(line) - 1) continue;
+        pos += n;
+        n = snprintf(line + pos, sizeof(line) - pos - 1, ",\"gyro\":{\"x\":%.2f,\"y\":%.2f,\"z\":%.2f}", s.gx, s.gy, s.gz);
+        if (n <= 0 || pos + n >= (int)sizeof(line) - 1) continue;
+        pos += n;
+        line[pos++] = '}';
+        line[pos]   = '\0';
+        Serial.println(line);
+    }
+
+    uint32_t dropped = s_selfDropped;
+    if (dropped != s_selfLastDropped) {
+        LOG_W("Gateway accel queue overflow: %lu samples dropped in total", (unsigned long)dropped);
+        s_selfLastDropped = dropped;
+    }
 }
 #endif  // GATEWAY_ACCEL_ENABLE
 
 /**
- * @brief 受信待ち画面を描く。
+ * @brief node の飲酒判定を 1 行（"N1 GOKU  52deg #12" など）にする。
+ *        文言は drink モジュールの to_text() に任せる。途絶・drink なしもここで判定する。
+ *
+ * @return 表示色
  */
-static void drawWaiting(void)
+static uint16_t nodeLine(const NodeEntry &node, uint32_t now, char *out, size_t cap)
 {
-    display_begin("== GATEWAY ==", TFT_CYAN);
-    display_print("Waiting...\n", 2, TFT_WHITE);
-    display_footer();
-}
+    int pos = snprintf(out, cap, "N%u ", node.nodeId);
+    if (now - node.lastRxMs >= NODE_STALE_MS) {
+        snprintf(out + pos, cap - pos, "no data\n");
+        return TFT_RED;
+    }
 
-/**
- * @brief 選択中の node の最新値を描く。
- */
-static void drawNode(uint8_t idx)
-{
-    if (idx >= s_nodeCount) return;
-    const NodeEntry &node = s_nodes[idx];
-
-    static const uint16_t headerColors[] = {TFT_GREEN, TFT_RED, TFT_YELLOW, TFT_CYAN, TFT_MAGENTA};
-    uint16_t color = (idx < 5) ? headerColors[idx] : TFT_WHITE;
-
-    char buf[64];
-    snprintf(buf, sizeof(buf), "Node %d (%d/%d)", node.nodeId, idx + 1, s_nodeCount);
-    display_begin(buf, color);
-
+    bool     found = false;
+    uint16_t color = TFT_WHITE;
     forEachRecord(node.data, node.len, [&](const Module *m, const RecordHeader *rec, const uint8_t *body) {
-        if (m == nullptr || m->to_text == nullptr) return;
-        if (m->to_text(body, rec->length, buf, sizeof(buf)) > 0) {
-            display_print(buf, 2, TFT_WHITE);
+        if (found || rec->module_id != MODULE_ID_DRINK || m == nullptr || m->to_text == nullptr) return;
+        found = m->to_text(body, rec->length, out + pos, cap - pos) > 0;
+        if (found) {
+            const char *t = out + pos;
+            color = (strncmp(t, "GOKU", 4) == 0) ? TFT_YELLOW : (strncmp(t, "PRESS", 5) == 0) ? TFT_LIGHTGREY : TFT_WHITE;
         }
     });
+    if (!found) {
+        snprintf(out + pos, cap - pos, "no drink\n");   // node 側で drink が無効
+        color = TFT_DARKGREY;
+    }
+    return color;
+}
 
-    snprintf(buf, sizeof(buf), "rx:%lu lost:%lu\n", (unsigned long)node.rxCount, (unsigned long)node.lostCount);
-    display_print(buf, 2, TFT_GREEN);
+/**
+ * @brief 通常画面: gateway の加速度、node ごとの飲酒判定（番号順）、AP MAC。
+ */
+static void drawMain(uint32_t now)
+{
+    char buf[48];
+    display_begin("== GATEWAY ==", TFT_CYAN);
 
-    char macStr[18];
-    comm_mac_to_str(node.mac, macStr);
-    display_print(macStr, 1, TFT_LIGHTGREY);
+#if GATEWAY_ACCEL_ENABLE
+    float x, y, z;
+    if (s_selfAccel != nullptr && accel_get(&x, &y, &z)) {   // IMU タスクが書く最新値（表示だけなので排他しない）
+        snprintf(buf, sizeof(buf), "X%+.2f Y%+.2f Z%+.2f\n", x, y, z);   // 20 文字（1 行）
+        display_print(buf, 2, TFT_GREEN);
+    } else {
+        display_print("accel: n/a\n", 2, TFT_DARKGREY);
+    }
+#else
+    display_print("accel: off\n", 2, TFT_DARKGREY);
+#endif
+
+    // node を番号順に並べる（最大 GATEWAY_MAX_NODES 台なので単純な選択で足りる）
+    uint8_t order[GATEWAY_MAX_NODES];
+    for (uint8_t i = 0; i < s_nodeCount; i++) order[i] = i;
+    for (uint8_t i = 0; i < s_nodeCount; i++) {
+        for (uint8_t j = i + 1; j < s_nodeCount; j++) {
+            if (s_nodes[order[j]].nodeId < s_nodes[order[i]].nodeId) {
+                uint8_t t = order[i]; order[i] = order[j]; order[j] = t;
+            }
+        }
+    }
+
+    if (s_nodeCount == 0) {
+        display_print("Waiting node...\n", 2, TFT_WHITE);
+    }
+    uint8_t shown = (s_nodeCount > DISP_NODE_LINES) ? DISP_NODE_LINES - 1 : s_nodeCount;
+    for (uint8_t i = 0; i < shown; i++) {
+        uint16_t color = nodeLine(s_nodes[order[i]], now, buf, sizeof(buf));
+        display_print(buf, 2, color);
+    }
+    if (shown < s_nodeCount) {
+        snprintf(buf, sizeof(buf), "+%u more\n", s_nodeCount - shown);
+        display_print(buf, 2, TFT_DARKGREY);
+    }
+
+    display_print(comm_self_mac(), 1, TFT_LIGHTGREY);
     display_footer();
 }
 
 /**
- * @brief 自機の AP MAC（node の COMM_GATEWAY_MAC に設定する値）と受信中の node 数を描く（ボタン B）。
+ * @brief 自機の AP MAC（node の COMM_GATEWAY_MAC に設定する値）を大きく描く（ボタン B）。
  */
 static void drawInfo(void)
 {
@@ -331,7 +428,7 @@ static void drawInfo(void)
     display_print("AP MAC:\n", 2, TFT_WHITE);
     snprintf(buf, sizeof(buf), "%s\n", comm_self_mac());
     display_print(buf, 2, TFT_YELLOW);
-    snprintf(buf, sizeof(buf), "Nodes: %u/%d  ch %d\n", s_nodeCount, GATEWAY_MAX_NODES, COMM_ESPNOW_CHANNEL);
+    snprintf(buf, sizeof(buf), "ch %d\n", COMM_ESPNOW_CHANNEL);
     display_print(buf, 2, TFT_WHITE);
     display_print("= COMM_GATEWAY_MAC\n", 1, TFT_LIGHTGREY);
     display_print("B: back", 1, TFT_DARKGREY);
@@ -357,31 +454,22 @@ void app_init(void)
     display_print("\n\nSet to\nCOMM_GATEWAY_MAC", 2, TFT_CYAN);
     delay(3000);
 
+#if GATEWAY_ACCEL_ENABLE
+    selfAccelStart();
+#endif
     LOG_I("Gateway ready.");
-    drawWaiting();
 }
 
 /**
- * @brief gateway のメインループ。ボタン A で表示 node を切り替え、受信キューを空になるまで処理し、
- *        取りこぼしを警告し、表示中の node が更新されていれば描き直す。
+ * @brief gateway のメインループ。ボタン B で画面を切り替え、受信キューを空になるまで処理し、
+ *        取りこぼしを警告し、自機の加速度を出し、画面を描き直す。
  */
 void app_loop(void)
 {
-    // ボタン B: AP MAC 表示の切り替え
+    // ボタン B: AP MAC の大きな表示と通常画面の切り替え
     if (M5.BtnB.wasPressed()) {
         s_showInfo  = !s_showInfo;
-        s_dispDirty = true;
-    }
-
-    // ボタン A: 表示する node を切り替える（AP MAC 表示中なら通常表示に戻る）
-    if (M5.BtnA.wasPressed()) {
-        if (s_showInfo) {
-            s_showInfo  = false;
-            s_dispDirty = true;
-        } else if (s_nodeCount > 1) {
-            s_dispNode  = (s_dispNode + 1) % s_nodeCount;
-            s_dispDirty = true;
-        }
+        s_infoDrawn = false;
     }
 
     // 受信キューを空になるまで処理
@@ -398,16 +486,19 @@ void app_loop(void)
         s_lastDropped = dropped;
     }
 
-    uint32_t now = millis();
 #if GATEWAY_ACCEL_ENABLE
-    selfAccelPoll(now);
+    selfAccelPoll();
 #endif
+    uint32_t now = millis();
 
-    if (s_dispDirty && display_due(now)) {
-        if (s_showInfo)          drawInfo();
-        else if (s_nodeCount > 0) drawNode(s_dispNode);
-        else                     drawWaiting();
-        s_dispDirty = false;
+    // 通常画面は加速度・途絶表示が変わるので毎回（最短 DISPLAY_PERIOD_MS 間隔）描く。AP MAC 表示は 1 回だけ
+    if (s_showInfo) {
+        if (!s_infoDrawn && display_due(now)) {
+            drawInfo();
+            s_infoDrawn = true;
+        }
+    } else if (display_due(now)) {
+        drawMain(now);
     }
 
     delay(1);

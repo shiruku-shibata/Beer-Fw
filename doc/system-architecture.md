@@ -24,7 +24,7 @@ flowchart TB
     G["Godot Engine<br/>node ごとに 1 サンプルずつ受け取る<br/>ゲーム側ロジック（本書の対象外）"]
 
     S -- "ESP-NOW · ヘッダ + モジュール別レコード · 10 Hz" --> R
-    R -- "USB シリアル 115200 bps · 1 行 1 JSON" --> P
+    R -- "USB シリアル 1500000 bps · 1 行 1 JSON" --> P
     P -- "GDExtension 直結、または UDP" --> G
 
     style P stroke-dasharray: 5 4
@@ -45,7 +45,7 @@ node と gateway は同じデバイス・同じソースツリーを使い、Pla
 | ライブラリ | m5stack/M5StickCPlus2@^1.0.2、m5stack/M5Unified@0.1.12 |
 | ビルド前処理 | scripts/fix_dfrobot.py（依存で入る DFRobot_GP8XXX の `analogWriteResolution` 呼び出しをパッチ） |
 | ビルド環境 | 下表 |
-| シリアル | USB、115200 bps |
+| シリアル | USB。gateway は 1500000 bps、node は 115200 bps（`COMM_SERIAL_BAUD`） |
 
 ### ビルド環境
 
@@ -132,11 +132,12 @@ gateway は最大 8 台の node を MAC で識別し、受信パケットごと�
 2. ESP-NOW を初期化し、受信コールバックを登録する。
 3. AP MAC を 3 秒表示する。node の `COMM_GATEWAY_MAC` にはこの AP MAC を設定する。
 
-**gateway 自身の加速度**（`GATEWAY_ACCEL_ENABLE`、既定 1）
+**gateway 自身の加速度・角速度**（`GATEWAY_ACCEL_ENABLE`、既定 1）
 
 - 初期化時に加速度モジュール（`module_find(MODULE_ID_ACCEL)`）の `init()` だけを呼ぶ（`scheduler` は回さない）。他のモジュール（振動・電池監視など）は gateway では動かさない。IMU が使えなければ警告を出して無効にする。
-- loop で `GATEWAY_ACCEL_PERIOD_MS`（既定 100 ms）ごとに `update()` → `encode()` → `to_json()` を呼び、`"node":0` の JSON 1 行をシリアルへ出す。node の行と同じモジュールの関数を使うので、`accel` の形式は node と一致する。
-- node の受信処理を先に済ませてから出す。node が 1 台もいなくても出る。
+- 起動画面の後に IMU タスク（優先度 2。loop は 1）を起動する。タスクは `GATEWAY_ACCEL_PERIOD_MS`（既定 10 ms）ごとに `update()` → `encode()` と角速度（`M5.Imu.getGyroData()`）を読み、キュー（16 件）に積む。loop で読むと LCD の描き直し（約 25 ms）の間のサンプルが抜けるため。
+- loop はキューを空になるまで取り出し、`to_json()` に `"gyro"` を足した `"node":0` の JSON 1 行ずつシリアルへ出す。node の行と同じモジュールの関数を使うので、`accel` の形式は node と一致する。
+- node の受信処理を先に済ませてから出す。node が 1 台もいなくても出る。キューがあふれたら捨てて警告を出す（`seq` が飛ぶ）。
 - `node_id` が 0 のパケットは gateway 自身の行と区別できないので、対応表に無ければ捨てる（警告は 5 秒に 1 回）。
 - `GATEWAY_ACCEL_PERIOD_MS` が 10 未満ならコンパイルエラーにする。
 
@@ -146,8 +147,8 @@ gateway は最大 8 台の node を MAC で識別し、受信パケットごと�
 - loop はバッファが空になるまで取り出し、ヘッダを検証して node 表に記録し、JSON を出力する。
 - JSON の `node` は、MAC が `GATEWAY_NODE_TABLE`（`config.h`）にあればその番号、なければパケットの `node_id`。表は node を初めて受信したときに 1 回だけ引く。表にない node はログに追加用の 1 行を出す。
 - `seq` の飛びから欠落数（`lost`）を数える。1000 以上の飛びは node の再起動とみなして数えない。
-- ボタン A で表示する node を切り替える。LCD は表示中の node が更新されたときだけ、最短 100 ms 間隔で描き直す。
-- ボタン B で AP MAC 表示（AP MAC・受信中の node 数・チャンネル）と切り替える。node 側もボタン B で自機 MAC・`NODE_ID`・送信先 gateway MAC を表示する。
+- LCD の通常画面は、gateway 自身の加速度、node ごとの飲酒判定（drink の `to_text()` を番号順に最大 5 行。3 秒届かなければ `no data`）、AP MAC。最短 100 ms 間隔で描き直す。受信数・欠落数は画面に出さない（JSON には出す）。
+- ボタン B で AP MAC の大きな表示（AP MAC・チャンネル）と切り替える。node 側もボタン B で自機 MAC・`NODE_ID`・送信先 gateway MAC を表示する。
 
 ## 振動モジュール（Vibration Hat）
 
@@ -239,7 +240,7 @@ gateway は知らない `module_id` のレコードを `length` で読み飛ば�
 | 0x03 | drink（ゲーム: mug） | uint8 フラグ（bit0 飲んでいる、bit1 検出中）、uint8 傾き [deg]、uint16 累計ゴクッ回数（4 バイト） |
 | 0x04 | lowbat | int8 電池残量 [%]、uint8 フラグ（bit0 残量低下 ≤20 %、bit1 電池切れ警報 ≤5 %）（2 バイト） |
 
-**シリアル出力（gateway → PC、115200 bps）**
+**シリアル出力（gateway → PC、1500000 bps）**
 
 ```json
 {"node":1,"mac":"AA:BB:CC:DD:EE:FF","seq":42,"t":12345,"rx":43,"lost":0,"accel":{"x":0.1234,"y":-0.4567,"z":0.9789},"vibration":0,"drink":{"armed":1,"active":0,"tilt":3,"gulps":0},"battery":{"level":80,"low":0,"alarm":0}}
@@ -253,10 +254,10 @@ gateway は知らない `module_id` のレコードを `length` で読み飛ば�
 | `rx` / `lost` | その node からの累計受信数と推定欠落数（`node` = 0 の行には出ない） |
 | モジュールのキー | 各モジュールの `to_json()` が出す要素（`accel` など） |
 
-gateway 自身の加速度の行（`GATEWAY_ACCEL_PERIOD_MS` ごと）:
+gateway 自身の加速度・角速度の行（`GATEWAY_ACCEL_PERIOD_MS` ごと）。`gyro` は [deg/s]:
 
 ```json
-{"node":0,"mac":"00:4B:12:A2:4C:5D","seq":7,"t":12345,"accel":{"x":0.0012,"y":-0.0034,"z":1.0011}}
+{"node":0,"mac":"00:4B:12:A2:4C:5D","seq":7,"t":12345,"accel":{"x":0.0012,"y":-0.0034,"z":1.0011},"gyro":{"x":-0.37,"y":0.06,"z":-0.12}}
 ```
 
 ログ行はすべて `# ` で始まる。PC 側は `{` で始まる行だけを JSON として読めばよい。
@@ -282,7 +283,7 @@ gateway 自身の加速度の行（`GATEWAY_ACCEL_PERIOD_MS` ごと）:
 | --- | --- | --- | --- |
 | 送信周期 100 ms（10 Hz） | `config.h` `COMM_TX_PERIOD_MS`、`ACCEL_PERIOD_MS` | ゲーム入力としては遅延が大きい | 必要なレートが決まったら設定値を下げる |
 | gateway MAC がハードコード | `config.h` `COMM_GATEWAY_MAC` | gateway を交換すると全 node の再ビルドが必要 | ブロードキャスト送信、またはペアリング手順を検討する |
-| 115200 bps の帯域 | gateway シリアル | node の台数とレートを上げると詰まる（JSON 1 行: `node` 環境の node 約 180 バイト、gateway 自身の行 約 105 バイト × 10 Hz。115200 bps ≒ 11.5 kB/s に対し、`node` 8 台 × 10 Hz で約 125 %） | ボーレートを上げる。または JSON を短くする |
+| シリアルの帯域・ボーレート | gateway シリアル | 1500000 bps ≒ 150 kB/s。gateway 自身の行 約 142 バイト × 100 Hz ≒ 14 kB/s、`node` 環境の node 約 180 バイト × 10 Hz × 8 台 ≒ 14.4 kB/s で合計約 19 %。460800・921600 は macOS 標準ドライバ（FTDI / CH9102）で化けたため使わない。Windows では未確認 | ボーレートを変えるときは、使う PC・USB チップで実機確認する |
 | LCD を毎回全面再描画 | `core/display` | ちらつき | 必要なら差分描画にする |
 | 実機での動作確認が未実施 | — | 新構成は 2026-10-04 時点でビルド確認のみ | node・gateway を書き込んで確認する |
 
@@ -294,6 +295,6 @@ gateway 自身の加速度の行（`GATEWAY_ACCEL_PERIOD_MS` ごと）:
 - [ ] 使用する Godot のバージョンと対象 OS
 - [ ] ゲームで必要な送信レートと許容できる遅延
 - [ ] 同時に使う node の台数（現状の上限は 8 台）
-- [ ] 加速度以外に送るデータはあるか（ジャイロ、ボタン、電池残量など）
+- [ ] 加速度以外に送るデータはあるか（ボタンなど。gateway のジャイロ・node の電池残量は対応済み）
 - [ ] 飲酒検出のしきい値・振動パターンの実機調整（ジョッキの重さ、M5Stick の固定方法で変わる）
 - [ ] Godot からデバイスへの逆方向通信（振動以外に LCD 表示など）は必要か

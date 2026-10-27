@@ -22,7 +22,7 @@ import socket
 import sys
 import time
 
-DEFAULT_BAUD = 115200
+DEFAULT_BAUD = 1500000   # gateway の COMM_SERIAL_BAUD（src/config.h）
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_UDP_PORT = 9000
 STATS_PERIOD_S = 5.0     # 転送数の表示周期 [s]
@@ -121,9 +121,11 @@ def run_serial(args, sock, dest):
 # 疑似データ（実機なし）
 # =============================================
 def run_demo(args, sock, dest):
-    """gateway と同じ形式の JSON を node ごとに 10 Hz で送る。gateway 自身の行（"node":0）も 10 Hz で送る。"""
+    """gateway と同じ形式の JSON を node ごとに 10 Hz で送る。gateway 自身の行（"node":0）は 100 Hz で送る。"""
     log("疑似データ: node %d 台 → UDP %s:%d" % (args.nodes, dest[0], dest[1]))
-    period = 0.1
+    period = 0.01           # gateway の行の周期（GATEWAY_ACCEL_PERIOD_MS）
+    node_every = 10         # node の行は gateway の行 10 回に 1 回（10 Hz）
+    tick = 0
     seq = [0] * args.nodes
     gulps = [0] * args.nodes
     gw_seq = 0
@@ -132,7 +134,7 @@ def run_demo(args, sock, dest):
 
     while True:
         t = time.monotonic() - start
-        for i in range(args.nodes):
+        for i in range(args.nodes if tick % node_every == 0 else 0):
             node = i + 1
             # node ごとに周期をずらして傾ける
             phase = t * (0.5 + 0.2 * i)
@@ -164,7 +166,7 @@ def run_demo(args, sock, dest):
             sock.sendto(json.dumps(packet, separators=(",", ":")).encode("utf-8"), dest)
             seq[i] = (seq[i] + 1) % 65536
 
-        # gateway 自身の加速度（"node":0。机に置いたまま、わずかに揺れる）
+        # gateway 自身の加速度・角速度（"node":0。机に置いたまま、わずかに揺れる）
         gateway = {
             "node": 0,
             "mac": "00:00:00:DE:00:00",
@@ -175,9 +177,15 @@ def run_demo(args, sock, dest):
                 "y": round(random.uniform(-0.01, 0.01), 4),
                 "z": round(1.0 + random.uniform(-0.01, 0.01), 4),
             },
+            "gyro": {
+                "x": round(random.uniform(-2.0, 2.0), 2),
+                "y": round(random.uniform(-2.0, 2.0), 2),
+                "z": round(random.uniform(-2.0, 2.0), 2),
+            },
         }
         sock.sendto(json.dumps(gateway, separators=(",", ":")).encode("utf-8"), dest)
         gw_seq = (gw_seq + 1) % 65536
+        tick += 1
 
         next_t += period
         time.sleep(max(0.0, next_t - time.monotonic()))

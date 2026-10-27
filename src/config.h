@@ -91,7 +91,14 @@
 #ifndef COMM_ENABLE
 #define COMM_ENABLE             1       // 0: node 単体動作（WiFi / ESP-NOW を起動しない。省電力）
 #endif
+#ifndef COMM_SERIAL_BAUD
+#if defined(ROLE_GATEWAY)
+#define COMM_SERIAL_BAUD        1500000 // gateway → PC。node 0 の行を 100 Hz で出すため 115200 では足りない。
+                                        // 460800 / 921600 は macOS 標準ドライバ（FTDI / CH9102）で化けるため、書き込みと同じ 1500000
+#else
 #define COMM_SERIAL_BAUD        115200
+#endif
+#endif
 #define COMM_ESPNOW_CHANNEL     1       // gateway の AP チャンネル
 #ifndef COMM_LOW_POWER
 #define COMM_LOW_POWER          0       // 1: 送信時だけ無線を起動（省電力。node は受信できない）
@@ -123,12 +130,12 @@
     {"64:B7:08:85:64:54", 1},   /* node（2026-10-18 登録） */
 #endif
 
-// gateway 自身の加速度。node の JSON と同じシリアルに "node":0 の行として出す
+// gateway 自身の加速度・角速度。node の JSON と同じシリアルに "node":0 の行として出す
 #ifndef GATEWAY_ACCEL_ENABLE
 #define GATEWAY_ACCEL_ENABLE    1
 #endif
 #ifndef GATEWAY_ACCEL_PERIOD_MS
-#define GATEWAY_ACCEL_PERIOD_MS 100     // 出力周期 [ms]（node の既定送信周期と同じ 10 Hz）
+#define GATEWAY_ACCEL_PERIOD_MS 10      // 出力周期 [ms]（100 Hz。ゲームのジャイロ閾値は 99 Hz で測定）
 #endif
 #define GATEWAY_SELF_NODE_ID    0       // gateway 自身の行の "node"（node は 1〜255 なので重ならない）
 
