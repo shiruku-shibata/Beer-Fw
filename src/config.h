@@ -66,6 +66,10 @@
 #define DRINK_TILT_START_DEG          40     // この角度以上で飲み始め候補 [deg]
 #define DRINK_TILT_END_DEG            30     // この角度未満で飲み終わり [deg]
 #define DRINK_START_HOLD_MS           300    // 飲み始めと判定するまでの継続時間 [ms]
+#ifndef DRINK_VIB_CONTINUOUS
+#define DRINK_VIB_CONTINUOUS          1      // 1: 飲んでいる間ずっと振動 / 0: ゴクッのパターンを繰り返す
+#endif
+#define DRINK_CONTINUOUS_STRENGTH     100    // 連続振動の強さ [%]
 #define DRINK_GULP_STRENGTH           100    // ゴクッの強さ [%]
 #define DRINK_GULP_ON1_MS             160    // 「ゴ」の振動時間 [ms]（モーターの立ち上がりに約 50 ms 必要）
 #define DRINK_GULP_GAP_MS             40     // 「ゴ」と「ク」の間 [ms]
