@@ -14,7 +14,9 @@
  *   DRINK_TILT_END_DEG を下回ったら飲み終わり（ヒステリシス）。
  * - 傾きの方向は問わない（M5Stick の入れ向きに依存しないため）。
  *
- * 【振動】1 回の「ゴクッ」= GULP_PATTERN のパルス列。傾きが深いほど間隔が短くなる。
+ * 【振動】DRINK_VIB_CONTINUOUS = 1（既定）は飲んでいる間ずっと振動する。
+ *        0 は 1 回の「ゴクッ」= GULP_PATTERN のパルス列を繰り返す。傾きが深いほど間隔が短くなる。
+ *        ゴクッ回数はどちらでも同じ間隔で数える。
  *
  * 【依存】accel（傾き）、vibration（振動）
  * 【送信データ】DrinkPayload 4 バイト
@@ -54,6 +56,7 @@ static const Pulse GULP_PATTERN[] = {
     {DRINK_GULP_STRENGTH, DRINK_GULP_ON2_MS, 0},                   // ク
 };
 static constexpr size_t GULP_PULSES = sizeof(GULP_PATTERN) / sizeof(GULP_PATTERN[0]);
+static constexpr uint32_t GULP_CYCLE_MS = DRINK_GULP_ON1_MS + DRINK_GULP_GAP_MS + DRINK_GULP_ON2_MS;   // 間隔を除く 1 回分
 
 // =============================================
 // 状態
@@ -165,6 +168,18 @@ static void runGulp(uint32_t now)
     }
 }
 
+/**
+ * @brief 飲んでいる間の連続振動を保ち、ゴクッ回数をパターン時と同じ間隔で数える。
+ */
+static void runContinuous(uint32_t now)
+{
+    if (!vibration_is_active()) vibration_start(DRINK_CONTINUOUS_STRENGTH, 0);   // 電池警報が明けたら再開する
+
+    if ((int32_t)(now - s_nextPulseMs) < 0) return;
+    s_gulps++;
+    s_nextPulseMs = now + GULP_CYCLE_MS + gulpInterval(s_tiltDeg);
+}
+
 // =============================================
 // Module インターフェース
 // =============================================
@@ -248,7 +263,11 @@ static void drink_update(void)
             vibration_stop();
             LOG_I("Drink: stop (gulps %u)", s_gulps);
         } else {
+#if DRINK_VIB_CONTINUOUS
+            runContinuous(now);
+#else
             runGulp(now);
+#endif
         }
         break;
 
